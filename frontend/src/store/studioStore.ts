@@ -26,6 +26,7 @@ interface StudioState {
   validationReport: ValidationReportResponse | null;
 
   // Calibration & Blueprints
+  activeBlueprintPath: string;
   calibration: BlueprintCalibration | null;
   blueprints: {
     topUrl?: string;
@@ -43,6 +44,8 @@ interface StudioState {
   animationValues: Record<number, number>; // CLA channel -> value
 
   // Actions
+  setActiveBlueprintPath: (path: string) => void;
+  setBlueprints: (urls: { topUrl?: string; frontUrl?: string; sideUrl?: string }) => void;
   setViewportMode: (mode: ViewportMode) => void;
   setShowWireframe: (show: boolean) => void;
   setShowGrid: (show: boolean) => void;
@@ -78,6 +81,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   isValidationModalOpen: false,
   validationReport: null,
 
+  activeBlueprintPath: 'docs/blueprint.jpg',
   calibration: null,
   blueprints: {
     topUrl: '/docs/blueprint_top.png',
@@ -102,6 +106,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   selectedPartName: null,
   animationValues: { 7: 0, 6: 0, 8: 0, 0: 1 },
 
+  setActiveBlueprintPath: (path) => set({ activeBlueprintPath: path }),
+  setBlueprints: (urls) => set((state) => ({ blueprints: { ...state.blueprints, ...urls } })),
   setViewportMode: (mode) => set({ viewportMode: mode }),
   setShowWireframe: (show) => set({ showWireframe: show }),
   setShowGrid: (show) => set({ showGrid: show }),
@@ -131,11 +137,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   // API Calls
   triggerReconstruction: async () => {
-    const { aircraftName, wingspanM, lengthM, heightM } = get();
+    const { aircraftName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
     set({ isProcessing: true, statusMessage: 'Reconstruindo geometria e fatiando superfícies móveis...' });
     try {
       const data = await airCreatorApi.generateAircraft({
-        blueprint_path: 'docs/blueprint.jpg',
+        blueprint_path: activeBlueprintPath || 'docs/blueprint.jpg',
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,
@@ -151,12 +157,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   triggerValidation: async () => {
-    const { aircraftName, presetName, wingspanM, lengthM, heightM } = get();
+    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
     set({ isProcessing: true, statusMessage: 'Executando checklist de engenharia aeronáutica...' });
     try {
       const report = await airCreatorApi.validateModel({
         aircraft_name: aircraftName,
-        blueprint_path: 'docs/blueprint.jpg',
+        blueprint_path: activeBlueprintPath || 'docs/blueprint.jpg',
         preset_name: presetName,
         wingspan_m: wingspanM,
         length_m: lengthM,
@@ -189,12 +195,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   downloadYsflightZip: async () => {
-    const { aircraftName, presetName, wingspanM, lengthM, heightM } = get();
+    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
     set({ isProcessing: true, statusMessage: 'Gerando pacote ZIP para YSFlight...' });
     try {
       const blob = await airCreatorApi.downloadYsflightZip({
         aircraft_name: aircraftName,
         preset_name: presetName,
+        blueprint_path: activeBlueprintPath || 'docs/blueprint.jpg',
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,
@@ -212,12 +219,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   downloadObjFiles: async () => {
-    const { aircraftName, presetName, wingspanM, lengthM, heightM } = get();
+    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
     set({ isProcessing: true, statusMessage: 'Exportando malha OBJ + MTL...' });
     try {
       const { obj, mtl, aircraft_id } = await airCreatorApi.downloadObj({
         aircraft_name: aircraftName,
         preset_name: presetName,
+        blueprint_path: activeBlueprintPath || 'docs/blueprint.jpg',
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,

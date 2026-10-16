@@ -41,6 +41,8 @@ export const BlueprintUploadModal: React.FC = () => {
     lengthM,
     heightM,
     setAircraftDimensions,
+    setActiveBlueprintPath,
+    setBlueprints,
     triggerReconstruction,
   } = useStudioStore();
 
@@ -83,7 +85,21 @@ export const BlueprintUploadModal: React.FC = () => {
       });
 
       if (selectedFile) {
-        await airCreatorApi.decomposeBlueprint(selectedFile);
+        const decomp = await airCreatorApi.decomposeBlueprint(selectedFile);
+        if (decomp.saved_path) {
+          setActiveBlueprintPath(decomp.saved_path);
+        }
+        if (decomp.top_view?.image_base64) {
+          setBlueprints({
+            topUrl: `data:image/png;base64,${decomp.top_view.image_base64}`,
+            frontUrl: decomp.front_view?.image_base64
+              ? `data:image/png;base64,${decomp.front_view.image_base64}`
+              : undefined,
+            sideUrl: decomp.side_view?.image_base64
+              ? `data:image/png;base64,${decomp.side_view.image_base64}`
+              : undefined,
+          });
+        }
       }
 
       await triggerReconstruction();

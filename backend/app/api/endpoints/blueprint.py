@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.core.config import get_project_root, resolve_blueprint_path
 from app.cv import (
     AircraftDimensions,
     AxisDetector,
@@ -51,6 +52,7 @@ class DecomposeResponse(BaseModel):
     wingspan_px: float
     length_px: float
     height_px: float
+    saved_path: str | None = None
 
 
 @router.post("/decompose", response_model=DecomposeResponse)
@@ -64,16 +66,23 @@ async def decompose_blueprint(
     extracting bounding boxes, centerlines, and dimensional measurements.
     """
     processor = BlueprintProcessor()
+    upload_dir = get_project_root() / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = None
 
     if file is not None:
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        target_path = upload_dir / "active_blueprint.jpg"
+        target_path.write_bytes(contents)
+        saved_path = str(target_path)
     elif image_path:
-        path = Path(image_path)
-        if not path.exists():
+        path = resolve_blueprint_path(image_path)
+        if not path or not path.exists():
             raise HTTPException(status_code=404, detail=f"Image path not found: {image_path}")
         img = cv2.imread(str(path))
+        saved_path = str(path)
     else:
         raise HTTPException(status_code=400, detail="Provide either file upload or image_path.")
 
@@ -111,6 +120,7 @@ async def decompose_blueprint(
         wingspan_px=axes.wingspan_px,
         length_px=axes.length_px,
         height_px=axes.height_px,
+        saved_path=saved_path,
     )
 
 
