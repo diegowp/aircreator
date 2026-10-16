@@ -1,100 +1,144 @@
 'use client';
 
 import React from 'react';
+import { TopNavbar } from './TopNavbar';
+import { HierarchySidebar } from './HierarchySidebar';
 import { OrthographicViewport } from './OrthographicViewport';
 import { PerspectiveViewport } from './PerspectiveViewport';
 import { AnimationControlPanel } from './AnimationControlPanel';
+import { BlueprintUploadModal } from './BlueprintUploadModal';
+import { ValidationReportModal } from './ValidationReportModal';
 import { useStudioStore } from '@/store/studioStore';
+import { ShieldCheck, HardDrive, Compass } from 'lucide-react';
 
 export const FourQuadrantStudio: React.FC = () => {
   const {
-    showWireframe,
-    setShowWireframe,
-    showGrid,
-    setShowGrid,
-    blueprintOpacity,
-    setBlueprintOpacity,
+    viewportMode,
     blueprints,
+    aircraftName,
+    wingspanM,
+    lengthM,
+    setModals,
   } = useStudioStore();
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 select-none overflow-hidden">
-      {/* Top Header / Toolbar */}
-      <header className="h-12 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between px-4 z-20">
-        <div className="flex items-center space-x-3">
-          <span className="text-base font-bold tracking-tight text-white flex items-center gap-2">
-            ✈️ AirCreator <span className="text-xs font-normal text-blue-400 bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800/40">Studio 4V</span>
-          </span>
-          <span className="text-slate-600">|</span>
-          <span className="text-xs text-slate-400">EMB-314 Super Tucano</span>
+    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 select-none overflow-hidden font-sans">
+      {/* Top Application Navbar */}
+      <TopNavbar />
+
+      {/* Main Studio Workspace (Viewports + Hierarchy Sidebar) */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Viewport Area */}
+        <div className="flex-1 flex flex-col relative overflow-hidden bg-slate-950">
+          {viewportMode === 'four_quadrants' && (
+            <main className="flex-1 grid grid-cols-2 grid-rows-2 gap-1 p-1 bg-slate-950">
+              {/* Quadrant 1 (Top Left): Top View (Plano XZ) */}
+              <OrthographicViewport
+                title="Vista Superior (Top / Plano XZ)"
+                plane="top"
+                blueprintUrl={blueprints.topUrl}
+              />
+
+              {/* Quadrant 2 (Top Right): 3D Perspective Free Orbit */}
+              <PerspectiveViewport />
+
+              {/* Quadrant 3 (Bottom Left): Front View (Plano XY) */}
+              <OrthographicViewport
+                title="Vista Frontal (Front / Plano XY)"
+                plane="front"
+                blueprintUrl={blueprints.frontUrl}
+              />
+
+              {/* Quadrant 4 (Bottom Right): Side View (Plano ZY) */}
+              <OrthographicViewport
+                title="Vista Lateral (Side / Plano ZY)"
+                plane="side"
+                blueprintUrl={blueprints.sideUrl}
+              />
+            </main>
+          )}
+
+          {viewportMode === 'single_3d' && (
+            <main className="flex-1 p-1 bg-slate-950">
+              <PerspectiveViewport />
+            </main>
+          )}
+
+          {viewportMode === 'top_only' && (
+            <main className="flex-1 p-1 bg-slate-950">
+              <OrthographicViewport
+                title="Vista Superior (Top / Plano XZ)"
+                plane="top"
+                blueprintUrl={blueprints.topUrl}
+              />
+            </main>
+          )}
+
+          {viewportMode === 'front_only' && (
+            <main className="flex-1 p-1 bg-slate-950">
+              <OrthographicViewport
+                title="Vista Frontal (Front / Plano XY)"
+                plane="front"
+                blueprintUrl={blueprints.frontUrl}
+              />
+            </main>
+          )}
+
+          {viewportMode === 'side_only' && (
+            <main className="flex-1 p-1 bg-slate-950">
+              <OrthographicViewport
+                title="Vista Lateral (Side / Plano ZY)"
+                plane="side"
+                blueprintUrl={blueprints.sideUrl}
+              />
+            </main>
+          )}
+
+          {/* Realtime Interactive Flight Kinematics Slider Floating Widget */}
+          <AnimationControlPanel />
         </div>
 
-        {/* Toolbar controls */}
-        <div className="flex items-center space-x-4 text-xs">
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showWireframe}
-              onChange={(e) => setShowWireframe(e.target.checked)}
-              className="rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-0"
-            />
-            <span className="text-slate-300">Wireframe</span>
-          </label>
+        {/* Metasequoia-style Scene Hierarchy & Part Visibility Sidebar */}
+        <HierarchySidebar />
+      </div>
 
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showGrid}
-              onChange={(e) => setShowGrid(e.target.checked)}
-              className="rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-0"
-            />
-            <span className="text-slate-300">Grade (Grid)</span>
-          </label>
+      {/* Bottom Status Bar */}
+      <footer className="h-7 bg-slate-900 border-t border-slate-800 px-4 flex items-center justify-between text-[11px] text-slate-400 z-20 select-none">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-slate-300 font-medium">Motor Paramétrico Ativo</span>
+          </div>
+          <span className="text-slate-700">|</span>
+          <div className="flex items-center gap-1.5">
+            <Compass className="w-3.5 h-3.5 text-blue-400" />
+            <span>YSFlight LH: +X Dir, +Y Cima, +Z Nariz</span>
+          </div>
+          <span className="text-slate-700">|</span>
+          <span className="text-slate-400 font-mono">
+            {aircraftName} ({wingspanM}m × {lengthM}m)
+          </span>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">Opacidade Blueprint:</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={blueprintOpacity}
-              onChange={(e) => setBlueprintOpacity(parseFloat(e.target.value))}
-              className="w-20 accent-blue-500 cursor-pointer"
-            />
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setModals({ validation: true })}
+            className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>12/12 Regras de Engenharia Aprovadas</span>
+          </button>
+          <span className="text-slate-700">|</span>
+          <div className="flex items-center gap-1 text-slate-400">
+            <HardDrive className="w-3.5 h-3.5 text-slate-500" />
+            <span>YSFlight SRF + DNM 16-bit</span>
           </div>
         </div>
-      </header>
+      </footer>
 
-      {/* Main 4-Quadrant Viewport Grid (Classic CAD / Metasequoia layout) */}
-      <main className="flex-1 grid grid-cols-2 grid-rows-2 gap-1 p-1 bg-slate-950">
-        {/* Quadrant 1 (Top Left): Top View (Plano XZ) */}
-        <OrthographicViewport
-          title="Vista Superior (Top / Plano XZ)"
-          plane="top"
-          blueprintUrl={blueprints.topUrl}
-        />
-
-        {/* Quadrant 2 (Top Right): 3D Perspective Free View */}
-        <PerspectiveViewport />
-
-        {/* Quadrant 3 (Bottom Left): Front View (Plano XY) */}
-        <OrthographicViewport
-          title="Vista Frontal (Front / Plano XY)"
-          plane="front"
-          blueprintUrl={blueprints.frontUrl}
-        />
-
-        {/* Quadrant 4 (Bottom Right): Side View (Plano ZY) */}
-        <OrthographicViewport
-          title="Vista Lateral (Side / Plano ZY)"
-          plane="side"
-          blueprintUrl={blueprints.sideUrl}
-        />
-      </main>
-
-      {/* Flight Control Surfaces & Gear Animation Panel */}
-      <AnimationControlPanel />
+      {/* Modals */}
+      <BlueprintUploadModal />
+      <ValidationReportModal />
     </div>
   );
 };
