@@ -114,9 +114,30 @@ def build_pipeline_package(req: ExportRequest) -> AircraftExportPackage:
         tail_z=-req.length_m * 0.40,
     )
 
-    full_visual_mesh = merge_meshes([fuselage_mesh, wing_r, wing_l, h_r, h_l, v_fin])
+    # 4. Canopy & Propeller
+    (f_min_x, f_min_y, f_min_z), (f_max_x, f_max_y, f_max_z) = fuselage_mesh.bounding_box()
+    f_len = max(1.0, f_max_z - f_min_z)
 
-    # 4. Kinematic Scene Graph (.DNM)
+    canopy_mesh = wing_gen.generate_canopy_mesh(
+        cockpit_start_z=f_max_z - f_len * 0.22,
+        cockpit_end_z=f_max_z - f_len * 0.56,
+        base_y=0.38,
+        max_height=req.height_m * 0.16,
+        max_half_width=req.wingspan_m * 0.045,
+    )
+
+    propeller_mesh = wing_gen.generate_propeller_mesh(
+        nose_z=f_max_z,
+        thrustline_y=0.0,
+        spinner_length=f_len * 0.09,
+        spinner_radius=f_len * 0.038,
+        prop_radius=req.wingspan_m * 0.12,
+        num_blades=5 if req.wingspan_m >= 10.5 else 3,
+    )
+
+    full_visual_mesh = merge_meshes([fuselage_mesh, canopy_mesh, wing_r, wing_l, h_r, h_l, v_fin, propeller_mesh])
+
+    # 5. Kinematic Scene Graph (.DNM)
     rigging_engine = KinematicsRiggingEngine()
     dnm_model = rigging_engine.rig_complete_aircraft(
         fuselage_mesh=fuselage_mesh,
@@ -125,6 +146,8 @@ def build_pipeline_package(req: ExportRequest) -> AircraftExportPackage:
         h_stab_r_mesh=h_r,
         h_stab_l_mesh=h_l,
         v_fin_mesh=v_fin,
+        propeller_mesh=propeller_mesh,
+        canopy_mesh=canopy_mesh,
     )
 
     # 5. Flight Dynamics (.DAT) & Collision Mesh

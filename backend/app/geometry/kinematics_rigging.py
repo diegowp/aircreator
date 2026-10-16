@@ -48,6 +48,7 @@ class AircraftRiggingComponents:
 class KinematicsRiggingEngine:
     def __init__(self):
         self.slicer = PartSlicer()
+        self.last_rigged_components: dict[str, dict] = {}
 
     def rig_complete_aircraft(
         self,
@@ -58,6 +59,7 @@ class KinematicsRiggingEngine:
         h_stab_l_mesh: SurfaceMesh,
         v_fin_mesh: SurfaceMesh,
         propeller_mesh: SurfaceMesh | None = None,
+        canopy_mesh: SurfaceMesh | None = None,
         aileron_deflection_deg: float = 15.0,
         elevator_deflection_deg: float = 18.0,
         rudder_deflection_deg: float = 25.0,
@@ -122,12 +124,19 @@ class KinematicsRiggingEngine:
         model.embed_mesh("rudder_1.srf", sliced_v_fin.fixed_mesh)
         model.embed_mesh("rudder_2.srf", sliced_v_fin.movable_mesh)
 
+        if canopy_mesh:
+            model.embed_mesh("canopy.srf", canopy_mesh)
+
         if propeller_mesh:
             model.embed_mesh("helice.srf", propeller_mesh)
 
         # 5. Build Scene Graph Nodes
 
         # Root Node: Fuselage (SRF 0)
+        fuselage_children = ["wing_r", "wing_l", "elevator_1", "rudder_1"]
+        if canopy_mesh:
+            fuselage_children.append("canopy")
+
         node_fuselage = DnmNode(
             name="fuselage",
             fil="fuselagem.srf",
@@ -135,9 +144,20 @@ class KinematicsRiggingEngine:
             pos=DnmPos(0, 0, 0, 0, 0, 0, 1),
             cnt=(0, 0, 0),
             rel="DEP",
-            children=["wing_r", "wing_l", "elevator_1", "rudder_1"],
+            children=fuselage_children,
         )
         model.add_node(node_fuselage)
+
+        if canopy_mesh:
+            node_canopy = DnmNode(
+                name="canopy",
+                fil="canopy.srf",
+                cla=0,
+                pos=DnmPos(0, 0, 0, 0, 0, 0, 1),
+                cnt=(0, 0, 0),
+                rel="DEP",
+            )
+            model.add_node(node_canopy, parent_name="fuselage")
 
         # Fixed Wing Right (parent of aileron right)
         node_wing_r = DnmNode(
@@ -259,18 +279,83 @@ class KinematicsRiggingEngine:
         )
         model.add_node(node_rudder)
 
-        # Optional Propeller: CLA 18
+        # Record rigged components for API & WebGL rendering
+        (min_x, min_y, min_z), (max_x, max_y, max_z) = fuselage_mesh.bounding_box()
+        nose_spinner = (0.0, 0.0, max_z + 0.1)
+
+        self.last_rigged_components = {
+            "fuselagem": {
+                "mesh": fuselage_mesh,
+                "pivot": (0.0, 0.0, 0.0),
+                "cla": 0,
+            },
+            "wing_r": {
+                "mesh": sliced_wing_r.fixed_mesh,
+                "pivot": (0.0, 0.0, 0.0),
+                "cla": 0,
+            },
+            "wing_l": {
+                "mesh": sliced_wing_l.fixed_mesh,
+                "pivot": (0.0, 0.0, 0.0),
+                "cla": 0,
+            },
+            "aileron_d": {
+                "mesh": sliced_wing_r.movable_mesh,
+                "pivot": cnt_aileron_r,
+                "cla": 7,
+            },
+            "aileron_lef": {
+                "mesh": sliced_wing_l.movable_mesh,
+                "pivot": cnt_aileron_l,
+                "cla": 7,
+            },
+            "elevator_1": {
+                "mesh": sliced_h_stab.fixed_mesh,
+                "pivot": (0.0, 0.0, 0.0),
+                "cla": 0,
+            },
+            "elevator": {
+                "mesh": sliced_h_stab.movable_mesh,
+                "pivot": cnt_elevator,
+                "cla": 6,
+            },
+            "rudder_1": {
+                "mesh": sliced_v_fin.fixed_mesh,
+                "pivot": (0.0, 0.0, 0.0),
+                "cla": 0,
+            },
+            "rudder_2": {
+                "mesh": sliced_v_fin.movable_mesh,
+                "pivot": cnt_rudder,
+                "cla": 8,
+            },
+        }
+
+        if canopy_mesh:
+            self.last_rigged_components["canopy"] = {
+                "mesh": canopy_mesh,
+                "pivot": (0.0, 0.0, 0.0),
+                "cla": 0,
+            }
+
         if propeller_mesh:
-            (min_x, min_y, min_z), (max_x, max_y, max_z) = fuselage_mesh.bounding_box()
-            nose_spinner = (0.0, 0.0, max_z + 0.1)
-            node_prop = DnmNode(
-                name="helice",
-                fil="helice.srf",
-                cla=18,
-                pos=DnmPos(0, 0, 0, 0, 0, 0, 1),
-                cnt=nose_spinner,
-                rel="DEP",
-            )
-            model.add_node(node_prop, parent_name="fuselage")
+            self.last_rigged_components["helice"] = {
+                "mesh": propeller_mesh,
+                "pivot": nose_spinner,
+                "cla": 18,
+            }
 
         return model
+
+    def get_component_meshes_dict(self) -> dict[str, dict]:
+        """
+        Export all rigged component meshes to JSON-serializable dictionaries
+        with vertices, faces, colors, alphas, round_shading, pivot, and cla.
+        """
+        res: dict[str, dict] = {}
+        for name, item in self.last_rigged_components.items():
+            mesh_dict = item["mesh"].to_dict()
+            mesh_dict["pivot"] = [float(p) for p in item["pivot"]]
+            mesh_dict["cla"] = int(item["cla"])
+            res[name] = mesh_dict
+        return res

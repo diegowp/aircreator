@@ -249,3 +249,180 @@ class WingGenerator:
         v_fin = self.generate_wing_mesh(v_params, side="center")
 
         return (h_stab_r, h_stab_l, v_fin)
+
+    def generate_canopy_mesh(
+        self,
+        cockpit_start_z: float,
+        cockpit_end_z: float,
+        base_y: float,
+        max_height: float = 0.55,
+        max_half_width: float = 0.42,
+        num_stations: int = 7,
+        num_arc_points: int = 8,
+        color: tuple[int, int, int] = (120, 200, 240),
+        alpha: int = 140,
+    ) -> SurfaceMesh:
+        """
+        Generate an aerodynamic cockpit bubble canopy mesh with transparency.
+        Z axis: cockpit_start_z (forward) > cockpit_end_z (rear).
+        Arc points: from right base (+X), arched over +Y, down to left base (-X).
+        """
+        all_vertices: list[SrfVertex] = []
+        faces: list[SrfFace] = []
+
+        z_coords = np.linspace(cockpit_start_z, cockpit_end_z, num_stations)
+        station_starts: list[int] = []
+
+        for i, z in enumerate(z_coords):
+            u = i / (num_stations - 1) if num_stations > 1 else 0.5
+            # Cockpit bubble envelope: rounded teardrop shape
+            env_h = math.sin(u * math.pi)
+            env_w = math.sin(u * math.pi) ** 0.65
+
+            h_station = max(0.04, max_height * env_h)
+            w_station = max(0.04, max_half_width * env_w)
+
+            station_starts.append(len(all_vertices))
+
+            # Generate arc from starboard (+X) to port (-X)
+            for j in range(num_arc_points):
+                phi = (math.pi * j) / (num_arc_points - 1)  # 0 to pi
+                # phi=0: x=+w, y=base_y; phi=pi/2: x=0, y=base_y + h; phi=pi: x=-w, y=base_y
+                vx = w_station * math.cos(phi)
+                vy = base_y + h_station * math.sin(phi)
+                vz = float(z)
+                all_vertices.append(SrfVertex(x=vx, y=vy, z=vz, round_shading=True))
+
+        # Quad strips between stations
+        m = num_arc_points
+        for i in range(num_stations - 1):
+            s_curr = station_starts[i]
+            s_next = station_starts[i + 1]
+
+            for j in range(m - 1):
+                # CCW winding seen from outside
+                v_curr_j = s_curr + j
+                v_curr_next = s_curr + j + 1
+                v_next_next = s_next + j + 1
+                v_next_j = s_next + j
+
+                face_indices = [v_curr_j, v_next_j, v_next_next, v_curr_next]
+                faces.append(SrfFace(vertex_indices=face_indices, color=color, alpha=alpha))
+
+        # Front cap at i=0
+        front_indices = [station_starts[0] + j for j in range(m)]
+        if len(front_indices) >= 3:
+            faces.append(SrfFace(vertex_indices=front_indices, color=color, alpha=alpha))
+
+        # Rear cap at i=num_stations-1
+        rear_indices = list(reversed([station_starts[-1] + j for j in range(m)]))
+        if len(rear_indices) >= 3:
+            faces.append(SrfFace(vertex_indices=rear_indices, color=color, alpha=alpha))
+
+        mesh = SurfaceMesh(name="canopy", vertices=all_vertices, faces=faces)
+        mesh.compute_missing_normals()
+        return mesh
+
+    def generate_propeller_mesh(
+        self,
+        nose_z: float,
+        thrustline_y: float = 0.0,
+        spinner_length: float = 0.85,
+        spinner_radius: float = 0.38,
+        prop_radius: float = 1.35,
+        num_blades: int = 5,
+        blade_chord: float = 0.16,
+        blade_thickness: float = 0.025,
+        spinner_color: tuple[int, int, int] = (30, 35, 45),
+        blade_color: tuple[int, int, int] = (25, 28, 35),
+        tip_color: tuple[int, int, int] = (245, 195, 25),
+    ) -> SurfaceMesh:
+        """
+        Generate aerodynamic nose spinner cone and propeller blades.
+        CLA 18 ready with pivot at (0, thrustline_y, nose_z + 0.1).
+        """
+        all_vertices: list[SrfVertex] = []
+        faces: list[SrfFace] = []
+
+        m_spinner = 16
+        # 1. Spinner Apex (at nose_z + spinner_length)
+        apex_idx = len(all_vertices)
+        all_vertices.append(SrfVertex(x=0.0, y=thrustline_y, z=nose_z + spinner_length, round_shading=True))
+
+        # 2. Spinner Base Ring (at nose_z)
+        base_start = len(all_vertices)
+        for k in range(m_spinner):
+            theta = (2.0 * math.pi * k) / m_spinner
+            vx = spinner_radius * math.cos(theta)
+            vy = thrustline_y + spinner_radius * math.sin(theta)
+            vz = nose_z
+            all_vertices.append(SrfVertex(x=vx, y=vy, z=vz, round_shading=True))
+
+        # Spinner Cone Triangles
+        for k in range(m_spinner):
+            k_next = (k + 1) % m_spinner
+            v_apex = apex_idx
+            v_curr = base_start + k
+            v_next = base_start + k_next
+            faces.append(SrfFace(vertex_indices=[v_apex, v_curr, v_next], color=spinner_color))
+
+        # Spinner Base Cap
+        base_cap_indices = list(reversed([base_start + k for k in range(m_spinner)]))
+        faces.append(SrfFace(vertex_indices=base_cap_indices, color=spinner_color))
+
+        # 3. Propeller Blades
+        r_inner = spinner_radius * 0.90
+        r_outer = prop_radius
+        r_tip_start = r_inner + (r_outer - r_inner) * 0.85
+
+        for b in range(num_blades):
+            blade_angle = (2.0 * math.pi * b) / num_blades
+            cos_a = math.cos(blade_angle)
+            sin_a = math.sin(blade_angle)
+
+            # Radial unit vector (spanwise)
+            ux = cos_a
+            uy = sin_a
+            # Chordwise unit vector (perpendicular in XY plane)
+            px = -sin_a
+            py = cos_a
+
+            # 3 span stations per blade: Root, TipStart, Tip
+            span_radii = [r_inner, r_tip_start, r_outer]
+            blade_station_starts: list[int] = []
+
+            for r in span_radii:
+                blade_station_starts.append(len(all_vertices))
+                chord_frac = 1.0 - 0.40 * ((r - r_inner) / (r_outer - r_inner))
+                half_c = (blade_chord * chord_frac) / 2.0
+                thick = blade_thickness / 2.0
+
+                center_x = r * ux
+                center_y = thrustline_y + r * uy
+                center_z = nose_z + spinner_length * 0.25
+
+                # 4 rectangle vertices for blade airfoil section
+                v0 = SrfVertex(x=center_x - half_c * px, y=center_y - half_c * py, z=center_z - thick, round_shading=True)
+                v1 = SrfVertex(x=center_x + half_c * px, y=center_y + half_c * py, z=center_z - thick, round_shading=True)
+                v2 = SrfVertex(x=center_x + half_c * px, y=center_y + half_c * py, z=center_z + thick, round_shading=True)
+                v3 = SrfVertex(x=center_x - half_c * px, y=center_y - half_c * py, z=center_z + thick, round_shading=True)
+                all_vertices.extend([v0, v1, v2, v3])
+
+            # Blade Root section to TipStart section (blade_color)
+            s0 = blade_station_starts[0]
+            s1 = blade_station_starts[1]
+            for quad in [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]:
+                faces.append(SrfFace(vertex_indices=[s0 + quad[0], s0 + quad[1], s0 + quad[2], s0 + quad[3]], color=blade_color))
+
+            # Blade TipStart to Tip (tip_color)
+            s2 = blade_station_starts[2]
+            for quad in [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]:
+                faces.append(SrfFace(vertex_indices=[s1 + quad[0], s1 + quad[1], s1 + quad[2], s1 + quad[3]], color=tip_color))
+
+            # Tip Cap
+            tip_cap = [s2 + 0, s2 + 1, s2 + 2, s2 + 3]
+            faces.append(SrfFace(vertex_indices=tip_cap, color=tip_color))
+
+        mesh = SurfaceMesh(name="helice", vertices=all_vertices, faces=faces)
+        mesh.compute_missing_normals()
+        return mesh

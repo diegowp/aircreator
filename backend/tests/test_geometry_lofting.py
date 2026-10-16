@@ -153,6 +153,30 @@ class TestGeometryLofting(unittest.TestCase):
         self.assertGreater(wing_area, 10.0)
         self.assertLess(wing_area, 25.0)
 
+    def test_canopy_and_propeller_generation(self):
+        gen = WingGenerator()
+        canopy = gen.generate_canopy_mesh(
+            cockpit_start_z=3.0,
+            cockpit_end_z=-0.5,
+            base_y=0.4,
+            max_height=0.55,
+            max_half_width=0.42,
+        )
+        self.assertEqual(canopy.name, "canopy")
+        self.assertGreater(len(canopy.vertices), 30)
+        self.assertGreater(len(canopy.faces), 20)
+        # Canopy faces must have alpha transparency < 255
+        self.assertTrue(any(f.alpha < 255 for f in canopy.faces))
+
+        prop = gen.generate_propeller_mesh(
+            nose_z=5.0,
+            thrustline_y=0.0,
+            num_blades=5,
+        )
+        self.assertEqual(prop.name, "helice")
+        self.assertGreater(len(prop.vertices), 50)
+        self.assertGreater(len(prop.faces), 40)
+
 
 if __name__ == "__main__":
     unittest.main()

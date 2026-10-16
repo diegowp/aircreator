@@ -13,17 +13,18 @@ interface PartItem {
   faces: number;
 }
 
-const AIRCRAFT_PARTS: PartItem[] = [
-  { id: 'fuselagem', name: 'Fuselagem Principal & Nariz', category: 'Estrutura Central', claBadge: 'PCK_0', vertices: 288, faces: 256 },
-  { id: 'wing_r', name: 'Asa Direita (Starboard)', category: 'Superfície Alar', claBadge: 'PCK_1', vertices: 96, faces: 80 },
-  { id: 'aileron_d', name: 'Aileron Direito Móvel', category: 'Controle de Voo', claBadge: 'CLA 7 (Roll)', vertices: 48, faces: 40 },
-  { id: 'wing_l', name: 'Asa Esquerda (Port)', category: 'Superfície Alar', claBadge: 'PCK_2', vertices: 96, faces: 80 },
-  { id: 'aileron_lef', name: 'Aileron Esquerdo Móvel', category: 'Controle de Voo', claBadge: 'CLA 7 (Roll)', vertices: 48, faces: 40 },
-  { id: 'elevator_1', name: 'Estabilizador Horizontal', category: 'Empenagem', claBadge: 'PCK_3', vertices: 64, faces: 52 },
-  { id: 'elevator', name: 'Profundor Móvel', category: 'Controle de Voo', claBadge: 'CLA 6 (Pitch)', vertices: 48, faces: 40 },
-  { id: 'rudder_1', name: 'Estabilizador Vertical (Fin)', category: 'Empenagem', claBadge: 'PCK_4', vertices: 56, faces: 46 },
-  { id: 'rudder_2', name: 'Leme de Direção Móvel', category: 'Controle de Voo', claBadge: 'CLA 8 (Yaw)', vertices: 48, faces: 40 },
-  { id: 'helice', name: 'Hélice Hartzell 5 Pás', category: 'Propulsão', claBadge: 'CLA 18 (Spin)', vertices: 120, faces: 90 },
+const DEFAULT_AIRCRAFT_PARTS: PartItem[] = [
+  { id: 'fuselagem', name: 'Fuselagem Principal & Nariz', category: 'Estrutura Central', claBadge: 'PCK_0', vertices: 290, faces: 304 },
+  { id: 'canopy', name: 'Canopy Transparente (Cockpit)', category: 'Transparência', claBadge: 'ZA 140', vertices: 56, faces: 44 },
+  { id: 'wing_r', name: 'Asa Direita (Starboard)', category: 'Superfície Alar', claBadge: 'PCK_1', vertices: 78, faces: 61 },
+  { id: 'aileron_d', name: 'Aileron Direito Móvel', category: 'Controle de Voo', claBadge: 'CLA 7 (Roll)', vertices: 10, faces: 4 },
+  { id: 'wing_l', name: 'Asa Esquerda (Port)', category: 'Superfície Alar', claBadge: 'PCK_2', vertices: 78, faces: 61 },
+  { id: 'aileron_lef', name: 'Aileron Esquerdo Móvel', category: 'Controle de Voo', claBadge: 'CLA 7 (Roll)', vertices: 10, faces: 4 },
+  { id: 'elevator_1', name: 'Estabilizador Horizontal', category: 'Empenagem', claBadge: 'PCK_3', vertices: 60, faces: 38 },
+  { id: 'elevator', name: 'Profundor Móvel', category: 'Controle de Voo', claBadge: 'CLA 6 (Pitch)', vertices: 28, faces: 17 },
+  { id: 'rudder_1', name: 'Estabilizador Vertical (Fin)', category: 'Empenagem', claBadge: 'PCK_4', vertices: 48, faces: 24 },
+  { id: 'rudder_2', name: 'Leme de Direção Móvel', category: 'Controle de Voo', claBadge: 'CLA 8 (Yaw)', vertices: 40, faces: 27 },
+  { id: 'helice', name: 'Hélice & Spinner', category: 'Propulsão', claBadge: 'CLA 18 (Spin)', vertices: 77, faces: 62 },
 ];
 
 export const HierarchySidebar: React.FC = () => {
@@ -33,13 +34,46 @@ export const HierarchySidebar: React.FC = () => {
     selectedPartName,
     selectPart,
     aircraftName,
+    reconstructionData,
   } = useStudioStore();
 
-  const totalVertices = AIRCRAFT_PARTS.reduce((sum, p) => sum + p.vertices, 0);
-  const totalFaces = AIRCRAFT_PARTS.reduce((sum, p) => sum + p.faces, 0);
+  const partsList: PartItem[] = React.useMemo(() => {
+    if (reconstructionData?.component_meshes) {
+      return Object.entries(reconstructionData.component_meshes).map(([id, comp]) => {
+        let category = 'Estrutura';
+        let claBadge = comp.cla !== undefined ? `CLA ${comp.cla}` : undefined;
+        let displayName = comp.name;
+
+        if (id === 'fuselagem') { displayName = 'Fuselagem Principal & Nariz'; category = 'Estrutura Central'; claBadge = 'PCK_0'; }
+        else if (id === 'canopy') { displayName = 'Canopy Transparente (Cockpit)'; category = 'Transparência'; claBadge = 'ZA 140'; }
+        else if (id === 'wing_r') { displayName = 'Asa Direita (Starboard)'; category = 'Superfície Alar'; claBadge = 'PCK_1'; }
+        else if (id === 'wing_l') { displayName = 'Asa Esquerda (Port)'; category = 'Superfície Alar'; claBadge = 'PCK_2'; }
+        else if (id === 'aileron_d') { displayName = 'Aileron Direito Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 7 (Roll)'; }
+        else if (id === 'aileron_lef') { displayName = 'Aileron Esquerdo Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 7 (Roll)'; }
+        else if (id === 'elevator_1') { displayName = 'Estabilizador Horizontal'; category = 'Empenagem'; claBadge = 'PCK_3'; }
+        else if (id === 'elevator') { displayName = 'Profundor Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 6 (Pitch)'; }
+        else if (id === 'rudder_1') { displayName = 'Estabilizador Vertical (Fin)'; category = 'Empenagem'; claBadge = 'PCK_4'; }
+        else if (id === 'rudder_2') { displayName = 'Leme de Direção Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 8 (Yaw)'; }
+        else if (id === 'helice') { displayName = 'Hélice & Spinner'; category = 'Propulsão'; claBadge = 'CLA 18 (Spin)'; }
+
+        return {
+          id,
+          name: displayName,
+          category,
+          claBadge,
+          vertices: comp.vertices.length,
+          faces: comp.faces.length,
+        };
+      });
+    }
+    return DEFAULT_AIRCRAFT_PARTS;
+  }, [reconstructionData]);
+
+  const totalVertices = partsList.reduce((sum, p) => sum + p.vertices, 0);
+  const totalFaces = partsList.reduce((sum, p) => sum + p.faces, 0);
 
   const toggleAll = (visible: boolean) => {
-    AIRCRAFT_PARTS.forEach((p) => setPartVisibility(p.id, visible));
+    partsList.forEach((p) => setPartVisibility(p.id, visible));
   };
 
   return (
@@ -78,7 +112,7 @@ export const HierarchySidebar: React.FC = () => {
 
       {/* Parts List (Metasequoia style) */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {AIRCRAFT_PARTS.map((part) => {
+        {partsList.map((part) => {
           const isVisible = partVisibility[part.id] ?? true;
           const isSelected = selectedPartName === part.id;
 

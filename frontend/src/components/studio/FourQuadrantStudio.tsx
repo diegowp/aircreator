@@ -19,7 +19,15 @@ export const FourQuadrantStudio: React.FC = () => {
     wingspanM,
     lengthM,
     setModals,
+    triggerReconstruction,
+    reconstructionData,
   } = useStudioStore();
+
+  React.useEffect(() => {
+    if (!reconstructionData) {
+      triggerReconstruction();
+    }
+  }, []);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 select-none overflow-hidden font-sans">

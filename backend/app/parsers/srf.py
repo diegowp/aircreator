@@ -271,6 +271,17 @@ class SurfaceMesh:
 
         return "\n".join(lines) + "\n"
 
+    def to_dict(self) -> dict:
+        """Export to JSON-serializable dictionary for API and WebGL rendering."""
+        return {
+            "name": self.name,
+            "vertices": [[round(v.x, 4), round(v.y, 4), round(v.z, 4)] for v in self.vertices],
+            "faces": [f.vertex_indices for f in self.faces],
+            "colors": [list(f.color) for f in self.faces],
+            "alphas": [f.alpha for f in self.faces],
+            "round_shading": [bool(v.round_shading) for v in self.vertices],
+        }
+
 
 def parse_srf_text(text: str, name: str = "surface") -> SurfaceMesh:
     """Parse raw SRF ASCII text into a SurfaceMesh instance."""

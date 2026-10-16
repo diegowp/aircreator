@@ -3,7 +3,7 @@
 import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { useStudioStore } from '@/store/studioStore';
-import { createProceduralSuperTucanoScene, updateAircraftKinematics, AircraftMeshScene } from '@/lib/threeMeshBuilder';
+import { createProceduralSuperTucanoScene, buildAircraftSceneFromApi, updateAircraftKinematics, AircraftMeshScene } from '@/lib/threeMeshBuilder';
 import { Maximize2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
 interface OrthographicViewportProps {
@@ -19,6 +19,8 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<AircraftMeshScene | null>(null);
+  const threeSceneRef = useRef<THREE.Scene | null>(null);
+  const blueprintMeshRef = useRef<THREE.Mesh | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const frustumSizeRef = useRef<number>(14);
 
@@ -28,6 +30,10 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
     blueprintOpacity,
     partVisibility,
     animationValues,
+    wingspanM,
+    lengthM,
+    heightM,
+    reconstructionData,
     setViewportMode,
   } = useStudioStore();
 
@@ -62,6 +68,99 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
     });
   }, [showWireframe]);
 
+  // Update aircraft model when reconstruction data arrives or changes
+  useEffect(() => {
+    if (!threeSceneRef.current) return;
+    const scene = threeSceneRef.current;
+
+    if (sceneRef.current) {
+      scene.remove(sceneRef.current.rootGroup);
+    }
+
+    const newScene = reconstructionData?.component_meshes
+      ? buildAircraftSceneFromApi(reconstructionData)
+      : createProceduralSuperTucanoScene();
+
+    sceneRef.current = newScene;
+    scene.add(newScene.rootGroup);
+
+    // Apply visibility
+    Object.entries(partVisibility).forEach(([partKey, isVisible]) => {
+      const partObj = newScene.parts[partKey];
+      if (partObj) partObj.visible = isVisible;
+    });
+
+    // Apply wireframe
+    newScene.rootGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => {
+            if ('wireframe' in m) m.wireframe = showWireframe;
+          });
+        } else if ('wireframe' in child.material) {
+          child.material.wireframe = showWireframe;
+        }
+      }
+    });
+  }, [reconstructionData]);
+
+  // Update blueprint overlay with exact aspect ratio and alignment
+  useEffect(() => {
+    if (!threeSceneRef.current || !blueprintUrl) return;
+    const scene = threeSceneRef.current;
+
+    const loader = new THREE.TextureLoader();
+    loader.load(blueprintUrl, (texture) => {
+      texture.minFilter = THREE.LinearFilter;
+      const imgAspect = (texture.image.width || 1) / (texture.image.height || 1);
+
+      if (blueprintMeshRef.current) {
+        scene.remove(blueprintMeshRef.current);
+        blueprintMeshRef.current.geometry.dispose();
+      }
+
+      let planeW = 12;
+      let planeH = 12;
+
+      if (plane === 'top') {
+        planeW = wingspanM;
+        planeH = wingspanM / imgAspect;
+      } else if (plane === 'side') {
+        planeW = lengthM;
+        planeH = lengthM / imgAspect;
+      } else if (plane === 'front') {
+        planeW = wingspanM;
+        planeH = wingspanM / imgAspect;
+      }
+
+      const geom = new THREE.PlaneGeometry(planeW, planeH);
+      const mat = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: blueprintOpacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const planeMesh = new THREE.Mesh(geom, mat);
+
+      if (plane === 'top') {
+        // Rotate so nose points to world +Z (Up on screen) and starboard to +X (Right on screen)
+        planeMesh.rotation.set(Math.PI / 2, 0, 0);
+        planeMesh.position.set(0, -0.6, 0);
+      } else if (plane === 'side') {
+        // Rotate so top is +Y and tail is -Z (Right on screen)
+        planeMesh.rotation.set(0, Math.PI / 2, 0);
+        planeMesh.position.set(-0.6, 0, 0);
+      } else if (plane === 'front') {
+        planeMesh.rotation.set(0, 0, 0);
+        planeMesh.position.set(0, 0, -0.6);
+      }
+
+      blueprintMeshRef.current = planeMesh;
+      scene.add(planeMesh);
+    });
+  }, [blueprintUrl, blueprintOpacity, plane, wingspanM, lengthM, heightM]);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
@@ -69,6 +168,7 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
     const height = container.clientHeight || 300;
 
     const scene = new THREE.Scene();
+    threeSceneRef.current = scene;
     scene.background = new THREE.Color(0x131722); // CAD dark background
 
     const aspect = width / height;
@@ -86,7 +186,7 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
     // Camera position according to plane
     if (plane === 'top') {
       camera.position.set(0, 50, 0);
-      camera.up.set(0, 0, -1); // -Z is nose forward
+      camera.up.set(0, 0, 1); // +Z is nose forward (top of screen!)
       camera.lookAt(0, 0, 0);
     } else if (plane === 'front') {
       camera.position.set(0, 0, 50);
@@ -122,35 +222,10 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
       scene.add(axes);
     }
 
-    // Blueprint Plane Overlay
-    if (blueprintUrl) {
-      const loader = new THREE.TextureLoader();
-      loader.load(blueprintUrl, (texture) => {
-        texture.minFilter = THREE.LinearFilter;
-        const geom = new THREE.PlaneGeometry(12, 12);
-        const mat = new THREE.MeshBasicMaterial({
-          map: texture,
-          transparent: true,
-          opacity: blueprintOpacity,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        });
-        const planeMesh = new THREE.Mesh(geom, mat);
-        if (plane === 'top') {
-          planeMesh.rotation.x = -Math.PI / 2;
-          planeMesh.position.y = -0.5;
-        } else if (plane === 'side') {
-          planeMesh.rotation.y = Math.PI / 2;
-          planeMesh.position.x = -0.5;
-        } else if (plane === 'front') {
-          planeMesh.position.z = -0.5;
-        }
-        scene.add(planeMesh);
-      });
-    }
-
-    // Aircraft Procedural Mesh
-    const aircraftScene = createProceduralSuperTucanoScene();
+    // Initial Aircraft Model (dynamic from API or fallback)
+    const aircraftScene = reconstructionData?.component_meshes
+      ? buildAircraftSceneFromApi(reconstructionData)
+      : createProceduralSuperTucanoScene();
     sceneRef.current = aircraftScene;
     scene.add(aircraftScene.rootGroup);
 
@@ -163,7 +238,9 @@ export const OrthographicViewport: React.FC<OrthographicViewportProps> = ({
     let animId: number;
     const animate = () => {
       animId = requestAnimationFrame(animate);
-      updateAircraftKinematics(aircraftScene, animValuesRef.current);
+      if (sceneRef.current) {
+        updateAircraftKinematics(sceneRef.current, animValuesRef.current);
+      }
       renderer.render(scene, camera);
     };
     animate();

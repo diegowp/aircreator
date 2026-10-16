@@ -4,16 +4,17 @@ import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useStudioStore } from '@/store/studioStore';
-import { createProceduralSuperTucanoScene, updateAircraftKinematics, AircraftMeshScene } from '@/lib/threeMeshBuilder';
+import { createProceduralSuperTucanoScene, buildAircraftSceneFromApi, updateAircraftKinematics, AircraftMeshScene } from '@/lib/threeMeshBuilder';
 import { Eye, RotateCcw, Video } from 'lucide-react';
 
 export const PerspectiveViewport: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<AircraftMeshScene | null>(null);
+  const threeSceneRef = useRef<THREE.Scene | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
 
-  const { showWireframe, showGrid, partVisibility, animationValues } = useStudioStore();
+  const { showWireframe, showGrid, partVisibility, animationValues, reconstructionData } = useStudioStore();
 
   // Animation values ref so the animate loop accesses the latest values without re-mounting
   const animValuesRef = useRef(animationValues);
@@ -49,6 +50,42 @@ export const PerspectiveViewport: React.FC = () => {
     });
   }, [showWireframe]);
 
+  // Update aircraft model when reconstruction data arrives or changes
+  useEffect(() => {
+    if (!threeSceneRef.current) return;
+    const scene = threeSceneRef.current;
+
+    if (sceneRef.current) {
+      scene.remove(sceneRef.current.rootGroup);
+    }
+
+    const newScene = reconstructionData?.component_meshes
+      ? buildAircraftSceneFromApi(reconstructionData)
+      : createProceduralSuperTucanoScene();
+
+    sceneRef.current = newScene;
+    scene.add(newScene.rootGroup);
+
+    // Apply visibility
+    Object.entries(partVisibility).forEach(([partKey, isVisible]) => {
+      const partObj = newScene.parts[partKey];
+      if (partObj) partObj.visible = isVisible;
+    });
+
+    // Apply wireframe
+    newScene.rootGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => {
+            if ('wireframe' in m) m.wireframe = showWireframe;
+          });
+        } else if ('wireframe' in child.material) {
+          child.material.wireframe = showWireframe;
+        }
+      }
+    });
+  }, [reconstructionData]);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
@@ -56,6 +93,7 @@ export const PerspectiveViewport: React.FC = () => {
     const height = container.clientHeight || 300;
 
     const scene = new THREE.Scene();
+    threeSceneRef.current = scene;
     scene.background = new THREE.Color(0x0c0f17); // Professional dark cockpit slate
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
@@ -107,8 +145,10 @@ export const PerspectiveViewport: React.FC = () => {
       scene.add(axesHelper);
     }
 
-    // Aeronautical Procedural Aircraft Model
-    const aircraftScene = createProceduralSuperTucanoScene();
+    // Aeronautical Aircraft Model (dynamic from API or fallback)
+    const aircraftScene = reconstructionData?.component_meshes
+      ? buildAircraftSceneFromApi(reconstructionData)
+      : createProceduralSuperTucanoScene();
     sceneRef.current = aircraftScene;
     scene.add(aircraftScene.rootGroup);
 
@@ -123,7 +163,9 @@ export const PerspectiveViewport: React.FC = () => {
       animId = requestAnimationFrame(animate);
 
       // Realtime Flight Kinematics
-      updateAircraftKinematics(aircraftScene, animValuesRef.current);
+      if (sceneRef.current) {
+        updateAircraftKinematics(sceneRef.current, animValuesRef.current);
+      }
 
       controls.update();
       renderer.render(scene, camera);

@@ -77,3 +77,15 @@ export interface BlueprintCalibration {
   lengthMeters: number;
   heightMeters: number;
 }
+
+export interface ComponentMeshDict {
+  name: string;
+  vertices: [number, number, number][];
+  faces: number[][];
+  colors: [number, number, number][];
+  alphas: number[];
+  round_shading: boolean[];
+  pivot?: [number, number, number];
+  cla?: number;
+}
+

@@ -14,6 +14,7 @@ from app.cv import (
 )
 from app.geometry import (
     FuselageLofter,
+    KinematicsRiggingEngine,
     WingGenerator,
     WingParameters,
     calculate_mesh_metrics,
@@ -31,6 +32,7 @@ class GenerateAircraftRequest(BaseModel):
     height_m: float = 3.97
     num_fuselage_stations: int = 18
     vertices_per_ring: int = 16
+    propeller_blades: int | None = None
 
 
 @router.post("/generate-aircraft")
@@ -41,7 +43,9 @@ async def generate_aircraft(req: GenerateAircraftRequest):
     - Calibrates scale and origins.
     - Lofts fuselage cross-section stations in quad rings.
     - Extrudes wings and tail empennage.
-    - Merges into full aircraft mesh and computes aerodynamic metrics.
+    - Generates transparent cockpit canopy and propeller blades with spinner.
+    - Slices control surfaces and rigs kinematics pivots (ailerons, elevators, rudder).
+    - Returns structured component meshes for WebGL rendering and full SRF text.
     """
     resolved_bp = resolve_blueprint_path(req.blueprint_path)
     decomp = None
@@ -136,14 +140,51 @@ async def generate_aircraft(req: GenerateAircraftRequest):
         tail_y=0.20,
     )
 
-    # 4. Merge into Complete Aircraft
+    # 4. Generate Canopy and Propeller
+    (f_min_x, f_min_y, f_min_z), (f_max_x, f_max_y, f_max_z) = fuselage_mesh.bounding_box()
+    f_len = max(1.0, f_max_z - f_min_z)
+
+    canopy_mesh = wing_gen.generate_canopy_mesh(
+        cockpit_start_z=f_max_z - f_len * 0.22,
+        cockpit_end_z=f_max_z - f_len * 0.56,
+        base_y=0.38,
+        max_height=req.height_m * 0.16,
+        max_half_width=req.wingspan_m * 0.045,
+    )
+
+    num_blades = req.propeller_blades or (5 if req.wingspan_m >= 10.5 else 3)
+    propeller_mesh = wing_gen.generate_propeller_mesh(
+        nose_z=f_max_z,
+        thrustline_y=0.0,
+        spinner_length=f_len * 0.09,
+        spinner_radius=f_len * 0.038,
+        prop_radius=req.wingspan_m * 0.12,
+        num_blades=num_blades,
+    )
+
+    # 5. Kinematics Rigging & Control Surface Slicing
+    rigging_engine = KinematicsRiggingEngine()
+    dnm_model = rigging_engine.rig_complete_aircraft(
+        fuselage_mesh=fuselage_mesh,
+        wing_r_mesh=wing_r,
+        wing_l_mesh=wing_l,
+        h_stab_r_mesh=h_r,
+        h_stab_l_mesh=h_l,
+        v_fin_mesh=v_fin,
+        propeller_mesh=propeller_mesh,
+        canopy_mesh=canopy_mesh,
+    )
+    component_meshes = rigging_engine.get_component_meshes_dict()
+
+    # 6. Merge into Complete Aircraft
     full_aircraft = merge_meshes(
-        [fuselage_mesh, wing_r, wing_l, h_r, h_l, v_fin],
+        [fuselage_mesh, canopy_mesh, wing_r, wing_l, h_r, h_l, v_fin, propeller_mesh],
         merged_name="complete_aircraft",
     )
 
     metrics = calculate_mesh_metrics(full_aircraft)
     wing_area_m2 = calculate_projected_planform_area(full_aircraft)
+    full_srf_str = full_aircraft.to_srf(short_syntax=True)
 
     return {
         "status": "success",
@@ -153,11 +194,16 @@ async def generate_aircraft(req: GenerateAircraftRequest):
         "scale_pixels_per_meter": round(calib.pixels_per_meter, 2),
         "components": {
             "fuselage": calculate_mesh_metrics(fuselage_mesh),
+            "canopy": calculate_mesh_metrics(canopy_mesh),
             "wing_right": calculate_mesh_metrics(wing_r),
             "wing_left": calculate_mesh_metrics(wing_l),
             "elevator_right": calculate_mesh_metrics(h_r),
             "elevator_left": calculate_mesh_metrics(h_l),
             "rudder": calculate_mesh_metrics(v_fin),
+            "propeller": calculate_mesh_metrics(propeller_mesh),
         },
-        "srf_preview": full_aircraft.to_srf(short_syntax=True)[:1500] + "\n...",
+        "component_meshes": component_meshes,
+        "full_srf": full_srf_str,
+        "srf_preview": full_srf_str[:1500] + "\n...",
     }
+

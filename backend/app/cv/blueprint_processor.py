@@ -199,8 +199,26 @@ class BlueprintProcessor:
         result = BlueprintDecompositionResult(original_shape=(h, w))
 
         for view_name, bbox in classified.items():
-            crop_img = gray[bbox.y : bbox.y2, bbox.x : bbox.x2]
-            crop_bin = binary[bbox.y : bbox.y2, bbox.x : bbox.x2]
+            crop_img = gray[bbox.y : bbox.y2, bbox.x : bbox.x2].copy()
+            crop_bin = binary[bbox.y : bbox.y2, bbox.x : bbox.x2].copy()
+
+            # Clean overlapping regions between views (e.g. Side view nose appearing in Top view)
+            if view_name == "top" and "side" in classified:
+                sb = classified["side"]
+                overlap_x1 = max(0, sb.x - bbox.x)
+                overlap_y1 = max(0, sb.y - bbox.y)
+                if overlap_x1 < crop_img.shape[1] and overlap_y1 < crop_img.shape[0]:
+                    crop_bin[overlap_y1:, overlap_x1:] = 0
+                    crop_img[overlap_y1:, overlap_x1:] = 255
+
+            # In technical blueprints, top view is often drawn horizontally.
+            # Transpose if horizontal so that Nose points Forward/Up (along Z) and Wings Left-Right (along X).
+            if view_name == "top":
+                if crop_bin.shape[1] >= crop_bin.shape[0] * 0.85:
+                    crop_img = cv2.transpose(crop_img)
+                    crop_bin = cv2.transpose(crop_bin)
+                    bbox = BoundingBox(x=bbox.x, y=bbox.y, width=bbox.height, height=bbox.width)
+
             view_crop = ViewCrop(
                 view_type=view_name,  # type: ignore
                 bbox=bbox,

@@ -80,20 +80,46 @@ class AxisDetector:
         mask = top_crop.binary_mask
         h, w = mask.shape
 
-        # Vertical projection (along height) gives wingtips along Y
+        # Check orientation:
+        # If w >= h * 0.8, wings are along X (standard CAD orientation: nose at top Y=0, tail at bottom, wings horizontal)
+        if w >= h * 0.8:
+            horiz_proj = np.sum(mask > 0, axis=0)
+            non_zero_x = np.where(horiz_proj > 0)[0]
+            x_min = float(non_zero_x[0]) if len(non_zero_x) > 0 else 0.0
+            x_max = float(non_zero_x[-1]) if len(non_zero_x) > 0 else float(w)
+            wingspan_px = x_max - x_min
+
+            symmetry_x = self.find_symmetry_axis_1d(mask, axis=1)
+            if abs(symmetry_x - (x_min + x_max) / 2.0) > 30:
+                symmetry_x = (x_min + x_max) / 2.0
+
+            vert_proj = np.sum(mask > 0, axis=1)
+            non_zero_y = np.where(vert_proj > 0)[0]
+            nose_y = float(non_zero_y[0]) if len(non_zero_y) > 0 else 0.0
+            tail_y = float(non_zero_y[-1]) if len(non_zero_y) > 0 else float(h)
+            length_px = tail_y - nose_y
+
+            return ViewAxes(
+                view_type="top",
+                centerline_px=symmetry_x,
+                nose_px=nose_y,
+                tail_px=tail_y,
+                wingtip_min_px=x_min,
+                wingtip_max_px=x_max,
+                span_or_length_px=wingspan_px,
+            )
+
+        # Legacy horizontal fuselage along X, wings along Y
         vert_proj = np.sum(mask > 0, axis=1)
         non_zero_y = np.where(vert_proj > 0)[0]
         y_min = float(non_zero_y[0]) if len(non_zero_y) > 0 else 0.0
         y_max = float(non_zero_y[-1]) if len(non_zero_y) > 0 else float(h)
         wingspan_px = y_max - y_min
 
-        # Symmetry axis along Y (horizontal line running along X)
         symmetry_y = self.find_symmetry_axis_1d(mask, axis=0)
-        # If symmetry search was skewed, fall back to geometric midpoint of wingtips
         if abs(symmetry_y - (y_min + y_max) / 2.0) > 30:
             symmetry_y = (y_min + y_max) / 2.0
 
-        # Horizontal projection gives nose and tail along X
         horiz_proj = np.sum(mask > 0, axis=0)
         non_zero_x = np.where(horiz_proj > 0)[0]
         nose_x = float(non_zero_x[0]) if len(non_zero_x) > 0 else 0.0
@@ -102,7 +128,7 @@ class AxisDetector:
 
         return ViewAxes(
             view_type="top",
-            centerline_px=symmetry_y,  # Horizontal centerline of fuselage
+            centerline_px=symmetry_y,
             nose_px=nose_x,
             tail_px=tail_x,
             wingtip_min_px=y_min,
