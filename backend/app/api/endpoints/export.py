@@ -24,6 +24,8 @@ from app.geometry import (
     WingParameters,
     merge_meshes,
 )
+from app.ai.spec import AircraftSemanticSpec
+from app.geometry.dynamic_builder import build_aircraft_from_semantic_spec
 from app.physics import (
     AIRCRAFT_PRESETS,
     AeroPhysicsCalibrator,
@@ -40,10 +42,34 @@ class ExportRequest(BaseModel):
     wingspan_m: float = 11.14
     length_m: float = 11.38
     height_m: float = 3.97
+    spec: dict | None = None
 
 
 def build_pipeline_package(req: ExportRequest) -> AircraftExportPackage:
     """Run full automated reconstruction and rigging pipeline to build an exportable package."""
+    if req.spec:
+        spec = AircraftSemanticSpec.model_validate(req.spec)
+        build_res = build_aircraft_from_semantic_spec(spec)
+        full_visual_mesh = build_res["full_aircraft"]
+        dnm_model = build_res["dnm_model"]
+        phys_calibrator = AeroPhysicsCalibrator()
+        dat_model = phys_calibrator.generate_flight_model(
+            aircraft_mesh=full_visual_mesh,
+            identify=req.aircraft_name,
+            preset_name=req.preset_name,
+        )
+        coll_gen = CollisionMeshGenerator()
+        collision_mesh = coll_gen.generate_collision_mesh(full_visual_mesh)
+        aid = sanitize_aircraft_id(req.aircraft_name)
+        return AircraftExportPackage(
+            aircraft_id=aid,
+            display_name=req.aircraft_name,
+            dat_model=dat_model,
+            dnm_model=dnm_model,
+            collision_mesh=collision_mesh,
+            visual_mesh=full_visual_mesh,
+        )
+
     resolved_bp = resolve_blueprint_path(req.blueprint_path)
     decomp = None
 

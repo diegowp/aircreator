@@ -37,6 +37,8 @@ interface StudioState {
   // 3D Geometry & Parts Visibility (Metasequoia style)
   activeMesh: SurfaceMesh | null;
   reconstructionData: ReconstructResponse | null;
+  currentSpec: any | null;
+  geminiApiKey: string;
   partVisibility: Record<string, boolean>;
   selectedPartName: string | null;
 
@@ -44,6 +46,7 @@ interface StudioState {
   animationValues: Record<number, number>; // CLA channel -> value
 
   // Actions
+  setGeminiApiKey: (key: string) => void;
   setActiveBlueprintPath: (path: string) => void;
   setBlueprints: (urls: { topUrl?: string; frontUrl?: string; sideUrl?: string }) => void;
   setViewportMode: (mode: ViewportMode) => void;
@@ -57,6 +60,7 @@ interface StudioState {
   setAnimationChannel: (cla: number, value: number) => void;
 
   // Async API Operations
+  uploadAndReconstruct: (formData: FormData) => Promise<void>;
   triggerReconstruction: () => Promise<void>;
   triggerValidation: () => Promise<void>;
   downloadYsflightZip: () => Promise<void>;
@@ -91,6 +95,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   activeMesh: null,
   reconstructionData: null,
+  currentSpec: null,
+  geminiApiKey: typeof window !== 'undefined' ? localStorage.getItem('aircreator_gemini_key') || '' : '',
   partVisibility: {
     fuselagem: true,
     wing_r: true,
@@ -106,6 +112,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   selectedPartName: null,
   animationValues: { 7: 0, 6: 0, 8: 0, 0: 1 },
 
+  setGeminiApiKey: (key: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('aircreator_gemini_key', key);
+    }
+    set({ geminiApiKey: key });
+  },
   setActiveBlueprintPath: (path) => set({ activeBlueprintPath: path }),
   setBlueprints: (urls) => set((state) => ({ blueprints: { ...state.blueprints, ...urls } })),
   setViewportMode: (mode) => set({ viewportMode: mode }),
@@ -136,8 +148,34 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     })),
 
   // API Calls
+  uploadAndReconstruct: async (formData: FormData) => {
+    set({ isProcessing: true, statusMessage: 'Enviando vistas para análise multimodal Gemini Vision e lofting 3D...' });
+    try {
+      const data = await airCreatorApi.uploadViews(formData);
+      const viewUrls = data.view_urls || {};
+      set({
+        reconstructionData: data,
+        currentSpec: data.spec || null,
+        aircraftName: data.aircraft_name || get().aircraftName,
+        wingspanM: data.spec?.wingspan_m ?? get().wingspanM,
+        lengthM: data.spec?.length_m ?? get().lengthM,
+        heightM: data.spec?.height_m ?? get().heightM,
+        blueprints: {
+          topUrl: viewUrls.top || get().blueprints.topUrl,
+          sideUrl: viewUrls.side || get().blueprints.sideUrl,
+          frontUrl: viewUrls.front || get().blueprints.frontUrl,
+        },
+        isProcessing: false,
+        statusMessage: `Aeronave '${data.aircraft_name}' reconstruída com sucesso via Gemini Vision!`,
+      });
+    } catch (err: any) {
+      set({ isProcessing: false, statusMessage: `Erro ao reconstruir: ${err.message}` });
+      throw err;
+    }
+  },
+
   triggerReconstruction: async () => {
-    const { aircraftName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
+    const { aircraftName, wingspanM, lengthM, heightM, activeBlueprintPath, geminiApiKey, currentSpec } = get();
     set({ isProcessing: true, statusMessage: 'Reconstruindo geometria e fatiando superfícies móveis...' });
     try {
       const data = await airCreatorApi.generateAircraft({
@@ -145,9 +183,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,
+        gemini_api_key: geminiApiKey,
+        spec: currentSpec,
       });
       set({
         reconstructionData: data,
+        currentSpec: data.spec || currentSpec,
         isProcessing: false,
         statusMessage: `Modelo 3D '${aircraftName}' Reconstruído com Sucesso!`,
       });
@@ -157,7 +198,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   triggerValidation: async () => {
-    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
+    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath, currentSpec } = get();
     set({ isProcessing: true, statusMessage: 'Executando checklist de engenharia aeronáutica...' });
     try {
       const report = await airCreatorApi.validateModel({
@@ -167,6 +208,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,
+        spec: currentSpec,
       });
       set({
         validationReport: report,
@@ -195,7 +237,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   downloadYsflightZip: async () => {
-    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
+    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath, currentSpec } = get();
     set({ isProcessing: true, statusMessage: 'Gerando pacote ZIP para YSFlight...' });
     try {
       const blob = await airCreatorApi.downloadYsflightZip({
@@ -205,6 +247,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,
+        spec: currentSpec,
       });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -219,7 +262,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   downloadObjFiles: async () => {
-    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath } = get();
+    const { aircraftName, presetName, wingspanM, lengthM, heightM, activeBlueprintPath, currentSpec } = get();
     set({ isProcessing: true, statusMessage: 'Exportando malha OBJ + MTL...' });
     try {
       const { obj, mtl, aircraft_id } = await airCreatorApi.downloadObj({
@@ -229,6 +272,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         wingspan_m: wingspanM,
         length_m: lengthM,
         height_m: heightM,
+        spec: currentSpec,
       });
       // Trigger OBJ download
       const objBlob = new Blob([obj], { type: 'text/plain' });

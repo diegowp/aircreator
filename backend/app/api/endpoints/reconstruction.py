@@ -1,209 +1,225 @@
 """Aircraft 3D Reconstruction and Lofting API Endpoints."""
 
-from pathlib import Path
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import base64
+import time
+from pathlib import Path
+from typing import Any
+
+import cv2
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.core.config import resolve_blueprint_path
-from app.cv import (
-    AircraftDimensions,
-    AxisDetector,
-    BlueprintCalibrator,
-    BlueprintProcessor,
-)
-from app.geometry import (
-    FuselageLofter,
-    KinematicsRiggingEngine,
-    WingGenerator,
-    WingParameters,
-    calculate_mesh_metrics,
-    calculate_projected_planform_area,
-    merge_meshes,
-)
+from app.ai.gemini_extractor import GeminiBlueprintExtractor
+from app.ai.spec import AircraftSemanticSpec
+from app.core.config import get_project_root, resolve_blueprint_path
+from app.cv.blueprint_processor import BlueprintProcessor
+from app.geometry.dynamic_builder import build_aircraft_from_semantic_spec
+from app.geometry.mesh_ops import calculate_mesh_metrics, calculate_projected_planform_area
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 
 
 class GenerateAircraftRequest(BaseModel):
-    blueprint_path: str = "docs/blueprint.jpg"
-    wingspan_m: float = 11.14
-    length_m: float = 11.38
-    height_m: float = 3.97
+    blueprint_path: str | None = "docs/blueprint.jpg"
+    wingspan_m: float | None = None
+    length_m: float | None = None
+    height_m: float | None = None
     num_fuselage_stations: int = 18
     vertices_per_ring: int = 16
     propeller_blades: int | None = None
+    gemini_api_key: str | None = None
+    top_view_path: str | None = None
+    side_view_path: str | None = None
+    front_view_path: str | None = None
+    spec: dict | None = None
 
 
 @router.post("/generate-aircraft")
 async def generate_aircraft(req: GenerateAircraftRequest):
     """
-    Generate complete 3D aircraft model from blueprint:
-    - Decomposes blueprint into 3 views.
-    - Calibrates scale and origins.
-    - Lofts fuselage cross-section stations in quad rings.
-    - Extrudes wings and tail empennage.
-    - Generates transparent cockpit canopy and propeller blades with spinner.
-    - Slices control surfaces and rigs kinematics pivots (ailerons, elevators, rudder).
-    - Returns structured component meshes for WebGL rendering and full SRF text.
+    Generate dynamic 3D aircraft model strictly driven by semantic specifications.
+    Uses Gemini Vision analysis or client-provided semantic spec without hardcoded templates.
     """
-    resolved_bp = resolve_blueprint_path(req.blueprint_path)
-    decomp = None
-
-    if resolved_bp and resolved_bp.exists():
-        try:
-            processor = BlueprintProcessor()
-            decomp = processor.decompose_file(resolved_bp)
-            detector = AxisDetector()
-            axes = detector.analyze_all(decomp.top_view, decomp.front_view, decomp.side_view)
-            specs = AircraftDimensions(
-                wingspan_m=req.wingspan_m,
-                length_m=req.length_m,
-                height_m=req.height_m,
-            )
-            calibrator = BlueprintCalibrator()
-            calib = calibrator.calibrate(axes, specs)
-        except Exception:
-            decomp = None
-
-    if decomp is None:
-        # Fallback calibration if blueprint is not available
-        from app.cv.axis_detector import AircraftBlueprintAxes, ViewAxes
-        top_axes = ViewAxes(view_type="top", centerline_px=250.0, span_or_length_px=500.0)
-        front_axes = ViewAxes(view_type="front", centerline_px=250.0, thrustline_px=100.0, span_or_length_px=500.0)
-        side_axes = ViewAxes(view_type="side", centerline_px=100.0, thrustline_px=100.0, groundline_px=160.0, span_or_length_px=500.0)
-        axes = AircraftBlueprintAxes(
-            top=top_axes,
-            front=front_axes,
-            side=side_axes,
-            wingspan_px=500.0,
-            length_px=500.0,
-            height_px=180.0,
-        )
-        specs = AircraftDimensions(
-            wingspan_m=req.wingspan_m,
-            length_m=req.length_m,
-            height_m=req.height_m,
-        )
-        calibrator = BlueprintCalibrator()
-        calib = calibrator.calibrate(axes, specs)
-
-    # 2. Loft Fuselage from Blueprint Masks (or synthetic profile)
-    lofter = FuselageLofter(
-        num_stations=req.num_fuselage_stations,
-        vertices_per_ring=req.vertices_per_ring,
-    )
-
-    if decomp and decomp.top_view and decomp.side_view:
-        profile = lofter.extract_profile_from_masks(
-            top_mask=decomp.top_view.binary_mask,
-            side_mask=decomp.side_view.binary_mask,
-            pixels_per_meter=calib.pixels_per_meter,
-            origin_top=calib.origin_top_px,
-            origin_side=calib.origin_side_px,
-        )
+    if req.spec:
+        spec = AircraftSemanticSpec.model_validate(req.spec)
     else:
-        profile = lofter.generate_synthetic_profile(
-            length_m=req.length_m,
-            nose_z=req.length_m * 0.45,
+        resolved_bp = resolve_blueprint_path(req.blueprint_path)
+        resolved_top = resolve_blueprint_path(req.top_view_path) if req.top_view_path else None
+        resolved_side = resolve_blueprint_path(req.side_view_path) if req.side_view_path else None
+        resolved_front = resolve_blueprint_path(req.front_view_path) if req.front_view_path else None
+
+        extractor = GeminiBlueprintExtractor(api_key=req.gemini_api_key)
+        spec = extractor.analyze_views(
+            top_image=resolved_top,
+            side_image=resolved_side,
+            front_image=resolved_front,
+            unified_blueprint=resolved_bp,
+            wingspan_hint_m=req.wingspan_m,
+            length_hint_m=req.length_m,
+            height_hint_m=req.height_m,
         )
 
-    fuselage_mesh = lofter.loft_fuselage_mesh(profile, mesh_name="fuselagem")
+    # Apply dimensional overrides if provided
+    if req.wingspan_m and req.wingspan_m > 0:
+        spec.wingspan_m = req.wingspan_m
+    if req.length_m and req.length_m > 0:
+        spec.length_m = req.length_m
+    if req.height_m and req.height_m > 0:
+        spec.height_m = req.height_m
 
-    # 3. Generate Wings and Empennage
-    wing_gen = WingGenerator()
-    semi_span = req.wingspan_m / 2.0
-    root_chord = req.length_m * 0.20
-    tip_chord = root_chord * 0.50
-
-    w_params = WingParameters(
-        name="wing",
-        semi_span_m=semi_span - 0.60,
-        root_chord_m=root_chord,
-        tip_chord_m=tip_chord,
-        sweep_deg=4.5,
-        dihedral_deg=5.0,
-        root_x=0.60,
-        root_y=-0.15,
-        root_z=req.length_m * 0.08,
-    )
-
-    wing_r = wing_gen.generate_wing_mesh(w_params, side="right")
-    wing_l = wing_gen.generate_wing_mesh(w_params, side="left")
-
-    h_r, h_l, v_fin = wing_gen.generate_empennage(
-        h_span_m=req.wingspan_m * 0.35,
-        h_chord_m=req.length_m * 0.10,
-        v_span_m=req.height_m * 0.50,
-        v_chord_m=req.length_m * 0.13,
-        tail_z=-req.length_m * 0.40,
-        tail_y=0.20,
-    )
-
-    # 4. Generate Canopy and Propeller
-    (f_min_x, f_min_y, f_min_z), (f_max_x, f_max_y, f_max_z) = fuselage_mesh.bounding_box()
-    f_len = max(1.0, f_max_z - f_min_z)
-
-    canopy_mesh = wing_gen.generate_canopy_mesh(
-        cockpit_start_z=f_max_z - f_len * 0.22,
-        cockpit_end_z=f_max_z - f_len * 0.56,
-        base_y=0.38,
-        max_height=req.height_m * 0.16,
-        max_half_width=req.wingspan_m * 0.045,
-    )
-
-    num_blades = req.propeller_blades or (5 if req.wingspan_m >= 10.5 else 3)
-    propeller_mesh = wing_gen.generate_propeller_mesh(
-        nose_z=f_max_z,
-        thrustline_y=0.0,
-        spinner_length=f_len * 0.09,
-        spinner_radius=f_len * 0.038,
-        prop_radius=req.wingspan_m * 0.12,
-        num_blades=num_blades,
-    )
-
-    # 5. Kinematics Rigging & Control Surface Slicing
-    rigging_engine = KinematicsRiggingEngine()
-    dnm_model = rigging_engine.rig_complete_aircraft(
-        fuselage_mesh=fuselage_mesh,
-        wing_r_mesh=wing_r,
-        wing_l_mesh=wing_l,
-        h_stab_r_mesh=h_r,
-        h_stab_l_mesh=h_l,
-        v_fin_mesh=v_fin,
-        propeller_mesh=propeller_mesh,
-        canopy_mesh=canopy_mesh,
-    )
-    component_meshes = rigging_engine.get_component_meshes_dict()
-
-    # 6. Merge into Complete Aircraft
-    full_aircraft = merge_meshes(
-        [fuselage_mesh, canopy_mesh, wing_r, wing_l, h_r, h_l, v_fin, propeller_mesh],
-        merged_name="complete_aircraft",
-    )
-
-    metrics = calculate_mesh_metrics(full_aircraft)
-    wing_area_m2 = calculate_projected_planform_area(full_aircraft)
-    full_srf_str = full_aircraft.to_srf(short_syntax=True)
+    result = build_aircraft_from_semantic_spec(spec)
+    full_srf_str = result["full_aircraft"].to_srf(short_syntax=True)
 
     return {
         "status": "success",
-        "aircraft_name": "Reconstructed Aircraft",
-        "metrics": metrics,
-        "wing_area_m2": round(wing_area_m2, 2),
-        "scale_pixels_per_meter": round(calib.pixels_per_meter, 2),
+        "aircraft_name": spec.aircraft_name,
+        "metrics": result["metrics"],
+        "wing_area_m2": result["wing_area_m2"],
+        "scale_pixels_per_meter": 50.0,
         "components": {
-            "fuselage": calculate_mesh_metrics(fuselage_mesh),
-            "canopy": calculate_mesh_metrics(canopy_mesh),
-            "wing_right": calculate_mesh_metrics(wing_r),
-            "wing_left": calculate_mesh_metrics(wing_l),
-            "elevator_right": calculate_mesh_metrics(h_r),
-            "elevator_left": calculate_mesh_metrics(h_l),
-            "rudder": calculate_mesh_metrics(v_fin),
-            "propeller": calculate_mesh_metrics(propeller_mesh),
+            k: {"vertices": len(v.get("vertices", [])), "faces": len(v.get("faces", []))}
+            for k, v in result["component_meshes"].items()
         },
-        "component_meshes": component_meshes,
+        "component_meshes": result["component_meshes"],
         "full_srf": full_srf_str,
         "srf_preview": full_srf_str[:1500] + "\n...",
+        "spec": spec.model_dump(),
     }
 
+
+@router.post("/upload-views")
+async def upload_views(
+    top_file: UploadFile | None = File(None),
+    side_file: UploadFile | None = File(None),
+    front_file: UploadFile | None = File(None),
+    blueprint_file: UploadFile | None = File(None),
+    aircraft_name: str | None = Form(None),
+    wingspan_m: float | None = Form(None),
+    length_m: float | None = Form(None),
+    height_m: float | None = Form(None),
+    gemini_api_key: str | None = Form(None),
+):
+    """
+    Upload separate orthographic views (Top, Side, Front) or a unified blueprint sheet.
+    Performs multimodal semantic extraction with Gemini Vision, lofts dynamic 3D geometry,
+    and returns WebGL meshes + view preview URLs.
+    """
+    upload_dir = get_project_root() / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    ts = int(time.time() * 1000)
+
+    top_bytes: bytes | None = None
+    side_bytes: bytes | None = None
+    front_bytes: bytes | None = None
+    bp_bytes: bytes | None = None
+
+    saved_paths: dict[str, str] = {}
+    view_urls: dict[str, str] = {}
+
+    if top_file and top_file.filename:
+        top_bytes = await top_file.read()
+        p = upload_dir / f"view_{ts}_top.png"
+        p.write_bytes(top_bytes)
+        saved_paths["top"] = str(p)
+        view_urls["top"] = f"data:image/png;base64,{base64.b64encode(top_bytes).decode('utf-8')}"
+
+    if side_file and side_file.filename:
+        side_bytes = await side_file.read()
+        p = upload_dir / f"view_{ts}_side.png"
+        p.write_bytes(side_bytes)
+        saved_paths["side"] = str(p)
+        view_urls["side"] = f"data:image/png;base64,{base64.b64encode(side_bytes).decode('utf-8')}"
+
+    if front_file and front_file.filename:
+        front_bytes = await front_file.read()
+        p = upload_dir / f"view_{ts}_front.png"
+        p.write_bytes(front_bytes)
+        saved_paths["front"] = str(p)
+        view_urls["front"] = f"data:image/png;base64,{base64.b64encode(front_bytes).decode('utf-8')}"
+
+    if blueprint_file and blueprint_file.filename:
+        bp_bytes = await blueprint_file.read()
+        p = upload_dir / f"bp_{ts}.jpg"
+        p.write_bytes(bp_bytes)
+        saved_paths["blueprint"] = str(p)
+
+        # If separate views were not provided, decompose the blueprint sheet
+        if not (top_bytes and side_bytes):
+            try:
+                proc = BlueprintProcessor()
+                decomp = proc.decompose_file(p)
+                if decomp.top_view and not top_bytes:
+                    _, buf = cv2.imencode(".png", decomp.top_view.image)
+                    top_bytes = buf.tobytes()
+                    view_urls["top"] = f"data:image/png;base64,{base64.b64encode(top_bytes).decode('utf-8')}"
+                    top_crop_path = upload_dir / f"crop_{ts}_top.png"
+                    top_crop_path.write_bytes(top_bytes)
+                    saved_paths["top"] = str(top_crop_path)
+
+                if decomp.side_view and not side_bytes:
+                    _, buf = cv2.imencode(".png", decomp.side_view.image)
+                    side_bytes = buf.tobytes()
+                    view_urls["side"] = f"data:image/png;base64,{base64.b64encode(side_bytes).decode('utf-8')}"
+                    side_crop_path = upload_dir / f"crop_{ts}_side.png"
+                    side_crop_path.write_bytes(side_bytes)
+                    saved_paths["side"] = str(side_crop_path)
+
+                if decomp.front_view and not front_bytes:
+                    _, buf = cv2.imencode(".png", decomp.front_view.image)
+                    front_bytes = buf.tobytes()
+                    view_urls["front"] = f"data:image/png;base64,{base64.b64encode(front_bytes).decode('utf-8')}"
+                    front_crop_path = upload_dir / f"crop_{ts}_front.png"
+                    front_crop_path.write_bytes(front_bytes)
+                    saved_paths["front"] = str(front_crop_path)
+            except Exception:
+                pass
+
+    if not top_bytes and not side_bytes and not front_bytes and not bp_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="Envie pelo menos uma das 3 vistas (Top/Side/Front) ou o arquivo completo da blueprint.",
+        )
+
+    extractor = GeminiBlueprintExtractor(api_key=gemini_api_key)
+    spec = extractor.analyze_views(
+        top_image=top_bytes,
+        side_image=side_bytes,
+        front_image=front_bytes,
+        unified_blueprint=bp_bytes,
+        wingspan_hint_m=wingspan_m,
+        length_hint_m=length_m,
+        height_hint_m=height_m,
+        aircraft_name_hint=aircraft_name,
+    )
+
+    if aircraft_name and aircraft_name.strip():
+        spec.aircraft_name = aircraft_name.strip()
+    if wingspan_m and wingspan_m > 0:
+        spec.wingspan_m = wingspan_m
+    if length_m and length_m > 0:
+        spec.length_m = length_m
+    if height_m and height_m > 0:
+        spec.height_m = height_m
+
+    result = build_aircraft_from_semantic_spec(spec)
+    full_srf_str = result["full_aircraft"].to_srf(short_syntax=True)
+
+    return {
+        "status": "success",
+        "aircraft_name": spec.aircraft_name,
+        "metrics": result["metrics"],
+        "wing_area_m2": result["wing_area_m2"],
+        "scale_pixels_per_meter": 50.0,
+        "components": {
+            k: {"vertices": len(v.get("vertices", [])), "faces": len(v.get("faces", []))}
+            for k, v in result["component_meshes"].items()
+        },
+        "component_meshes": result["component_meshes"],
+        "full_srf": full_srf_str,
+        "srf_preview": full_srf_str[:1500] + "\n...",
+        "spec": spec.model_dump(),
+        "view_urls": view_urls,
+        "saved_paths": saved_paths,
+    }

@@ -36,6 +36,13 @@ export interface ReconstructResponse {
   component_meshes?: Record<string, ComponentMeshDict>;
   srf_preview?: string;
   full_srf?: string;
+  spec?: any;
+  view_urls?: {
+    top?: string;
+    side?: string;
+    front?: string;
+  };
+  saved_paths?: Record<string, string>;
 }
 
 export interface ValidationReportResponse {
@@ -86,11 +93,25 @@ export const airCreatorApi = {
     return await res.json();
   },
 
+  async uploadViews(formData: FormData): Promise<ReconstructResponse> {
+    const res = await fetch(`${API_BASE_URL}/reconstruction/upload-views`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Erro ao reconstruir com as vistas' }));
+      throw new Error(err.detail || 'Erro ao reconstruir aeronave a partir das vistas');
+    }
+    return await res.json();
+  },
+
   async generateAircraft(params: {
     blueprint_path?: string;
-    wingspan_m: number;
-    length_m: number;
-    height_m: number;
+    wingspan_m?: number;
+    length_m?: number;
+    height_m?: number;
+    gemini_api_key?: string;
+    spec?: any;
   }): Promise<ReconstructResponse> {
     const res = await fetch(`${API_BASE_URL}/reconstruction/generate-aircraft`, {
       method: 'POST',
@@ -100,8 +121,8 @@ export const airCreatorApi = {
         wingspan_m: params.wingspan_m,
         length_m: params.length_m,
         height_m: params.height_m,
-        num_fuselage_stations: 18,
-        vertices_per_ring: 16,
+        gemini_api_key: params.gemini_api_key,
+        spec: params.spec,
       }),
     });
     if (!res.ok) {
@@ -118,6 +139,7 @@ export const airCreatorApi = {
     wingspan_m: number;
     length_m: number;
     height_m: number;
+    spec?: any;
   }): Promise<ValidationReportResponse> {
     const res = await fetch(`${API_BASE_URL}/export/validate`, {
       method: 'POST',
@@ -135,6 +157,7 @@ export const airCreatorApi = {
     wingspan_m: number;
     length_m: number;
     height_m: number;
+    spec?: any;
   }): Promise<Blob> {
     const res = await fetch(`${API_BASE_URL}/export/ysflight-zip`, {
       method: 'POST',
@@ -152,6 +175,7 @@ export const airCreatorApi = {
     wingspan_m: number;
     length_m: number;
     height_m: number;
+    spec?: any;
   }): Promise<{ obj: string; mtl: string; aircraft_id: string }> {
     const res = await fetch(`${API_BASE_URL}/export/obj`, {
       method: 'POST',
@@ -162,3 +186,4 @@ export const airCreatorApi = {
     return await res.json();
   },
 };
+

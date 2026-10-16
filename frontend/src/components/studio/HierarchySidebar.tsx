@@ -54,7 +54,8 @@ export const HierarchySidebar: React.FC = () => {
         else if (id === 'elevator') { displayName = 'Profundor Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 6 (Pitch)'; }
         else if (id === 'rudder_1') { displayName = 'Estabilizador Vertical (Fin)'; category = 'Empenagem'; claBadge = 'PCK_4'; }
         else if (id === 'rudder_2') { displayName = 'Leme de Direção Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 8 (Yaw)'; }
-        else if (id === 'helice') { displayName = 'Hélice & Spinner'; category = 'Propulsão'; claBadge = 'CLA 18 (Spin)'; }
+        else if (id === 'helice' || id === 'propeller') { displayName = 'Hélice & Spinner'; category = 'Propulsão'; claBadge = 'CLA 18 (Spin)'; }
+        else if (id === 'jet_nozzle') { displayName = 'Bocal de Escape / Exaustor Jet'; category = 'Propulsão'; claBadge = 'NOZZLE'; }
 
         return {
           id,
