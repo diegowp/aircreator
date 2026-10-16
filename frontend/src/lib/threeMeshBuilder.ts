@@ -89,12 +89,14 @@ export function buildAircraftSceneFromApi(reconstructData: ReconstructResponse):
     let mat: THREE.Material = fuselageMat;
     if (compName.startsWith('wing') || compName.startsWith('aileron')) {
       mat = wingMat;
-    } else if (compName.startsWith('elevator') || compName.startsWith('rudder')) {
+    } else if (compName.startsWith('elevator') || compName.startsWith('rudder') || compName.startsWith('dorsal')) {
       mat = tailMat;
     } else if (compName === 'canopy') {
       mat = canopyMat;
-    } else if (compName === 'helice' || compName === 'propeller') {
+    } else if (compName === 'helice' || compName === 'propeller' || compName === 'jet_nozzle') {
       mat = darkMat;
+    } else if (compName.startsWith('engine')) {
+      mat = fuselageMat;
     }
 
     const mesh = new THREE.Mesh(geom, mat);

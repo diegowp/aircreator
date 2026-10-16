@@ -78,6 +78,19 @@ AIRCRAFT_PRESETS: dict[str, AircraftCategoryPreset] = {
         cl_max_clean=1.70,
         cl_max_flap=2.40,
     ),
+    "AIRLINER": AircraftCategoryPreset(
+        category_name="NORMAL",
+        airclass="AIRPLANE",
+        propulsion_type="JET",
+        default_thrust_kg=26000.0,
+        has_afterburner=False,
+        clean_weight_ratio=340.0,
+        aspect_ratio_typical=9.5,
+        cl_max_clean=1.60,
+        cl_max_flap=2.60,
+        cd0=0.018,
+        oswald_e=0.86,
+    ),
 }
 
 

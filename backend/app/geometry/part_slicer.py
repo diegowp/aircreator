@@ -45,13 +45,28 @@ class PartSlicer:
 
         # In YSFlight: +Z is forward (Leading Edge), -Z is rear (Trailing Edge)
         span_dim = (min_y, max_y) if is_vertical else (min_x, max_x)
-        span_len = span_dim[1] - span_dim[0]
-        chord_len = max_z - min_z
+        span_len = max(0.1, span_dim[1] - span_dim[0])
+        chord_len = max(0.1, max_z - min_z)
 
         # Boundaries in metric space
         s_min = span_dim[0] + span_start_fraction * span_len
         s_max = span_dim[0] + span_end_fraction * span_len
-        z_hinge_cut = max_z - chord_cut_fraction * chord_len
+
+        # Compute local chord bounds for each span station to support swept wings
+        span_bins: dict[int, list[float]] = {}
+        for v in surface_mesh.vertices:
+            span_val = v.y if is_vertical else v.x
+            bin_idx = int(round((span_val - span_dim[0]) / max(0.05, span_len) * 30))
+            if bin_idx not in span_bins:
+                span_bins[bin_idx] = []
+            span_bins[bin_idx].append(v.z)
+
+        station_cut_cache: dict[int, float] = {}
+        for b_idx, z_vals in span_bins.items():
+            st_max_z = max(z_vals)
+            st_min_z = min(z_vals)
+            st_chord = max(0.2, st_max_z - st_min_z)
+            station_cut_cache[b_idx] = st_max_z - chord_cut_fraction * st_chord
 
         # Classify vertices
         fixed_vertices: list[SrfVertex] = []
@@ -63,6 +78,8 @@ class PartSlicer:
         for idx, v in enumerate(surface_mesh.vertices):
             span_val = v.y if is_vertical else v.x
             is_in_span = s_min <= span_val <= s_max
+            b_idx = int(round((span_val - span_dim[0]) / max(0.05, span_len) * 30))
+            z_hinge_cut = station_cut_cache.get(b_idx, max_z - chord_cut_fraction * chord_len)
             is_aft = v.z <= z_hinge_cut
 
             if is_in_span and is_aft:
@@ -70,7 +87,6 @@ class PartSlicer:
                 movable_vertices.append(
                     SrfVertex(x=v.x, y=v.y, z=v.z, round_shading=v.round_shading)
                 )
-                # Check if near the hinge line cut
                 if abs(v.z - z_hinge_cut) < chord_len * 0.15:
                     hinge_pts.append(v)
             else:
@@ -79,38 +95,40 @@ class PartSlicer:
                     SrfVertex(x=v.x, y=v.y, z=v.z, round_shading=v.round_shading)
                 )
 
-        # Distribute faces
+        # Distribute faces: NEVER discard faces to maintain water-tight solid wing mesh!
         fixed_faces: list[SrfFace] = []
         movable_faces: list[SrfFace] = []
 
         for f in surface_mesh.faces:
-            movable_count = sum(1 for vi in f.vertex_indices if vi in old_to_movable)
-
-            # If majority of vertices belong to movable
-            if movable_count >= len(f.vertex_indices) / 2:
-                # Map to movable indices if all exist
-                if all(vi in old_to_movable for vi in f.vertex_indices):
-                    new_indices = [old_to_movable[vi] for vi in f.vertex_indices]
-                    movable_faces.append(
-                        SrfFace(
-                            vertex_indices=new_indices,
-                            color=f.color,
-                            bright=f.bright,
-                            alpha=f.alpha,
-                        )
+            if all(vi in old_to_movable for vi in f.vertex_indices):
+                new_indices = [old_to_movable[vi] for vi in f.vertex_indices]
+                movable_faces.append(
+                    SrfFace(
+                        vertex_indices=new_indices,
+                        color=f.color,
+                        bright=f.bright,
+                        alpha=f.alpha,
                     )
+                )
             else:
-                # Map to fixed indices if all exist
-                if all(vi in old_to_fixed for vi in f.vertex_indices):
-                    new_indices = [old_to_fixed[vi] for vi in f.vertex_indices]
-                    fixed_faces.append(
-                        SrfFace(
-                            vertex_indices=new_indices,
-                            color=f.color,
-                            bright=f.bright,
-                            alpha=f.alpha,
+                # Keep face in fixed wing mesh. Ensure all required vertices exist in fixed_vertices
+                new_indices = []
+                for vi in f.vertex_indices:
+                    if vi not in old_to_fixed:
+                        v = surface_mesh.vertices[vi]
+                        old_to_fixed[vi] = len(fixed_vertices)
+                        fixed_vertices.append(
+                            SrfVertex(x=v.x, y=v.y, z=v.z, round_shading=v.round_shading)
                         )
+                    new_indices.append(old_to_fixed[vi])
+                fixed_faces.append(
+                    SrfFace(
+                        vertex_indices=new_indices,
+                        color=f.color,
+                        bright=f.bright,
+                        alpha=f.alpha,
                     )
+                )
 
         # Calculate Hinge Center & Direction Vector
         if hinge_pts:

@@ -49,6 +49,8 @@ class WingSpec(BaseModel):
     )
     root_z: float = Field(default=0.80, description="Longitudinal position of wing root leading edge along Z")
     thickness_ratio: float = Field(default=0.12, description="NACA airfoil thickness ratio (e.g. 0.10 to 0.15)")
+    has_winglets: bool = Field(default=False, description="True if wingtips have vertical winglets (e.g. 737 MAX split scimitar, A320 sharklets)")
+    winglet_height_m: float = Field(default=1.40, description="Height of winglet above wingtip in meters")
 
 
 class VerticalFinSpec(BaseModel):
@@ -78,6 +80,8 @@ class TailSpec(BaseModel):
     )
     horizontal_stabilizer: HorizontalStabSpec | None = None
     vertical_fins: list[VerticalFinSpec] = Field(description="List of vertical fins (1 for central, 2 for twin fins)")
+    has_dorsal_fin: bool = Field(default=False, description="True if vertical fin has a forward dorsal fillet extension")
+    dorsal_fin_length_m: float = Field(default=2.50, description="Length of dorsal fillet along fuselage spine")
 
 
 class PropulsionSpec(BaseModel):
@@ -90,6 +94,12 @@ class PropulsionSpec(BaseModel):
     thrustline_y: float = Field(default=0.0, description="Thrust axis vertical coordinate")
     exhaust_z: float = Field(default=-5.0, description="Jet exhaust longitudinal coordinate if jet_internal")
     exhaust_radius: float = Field(default=0.35, description="Jet nozzle radius in meters")
+    # Underwing turbofans (Airliners / Cargo Jets)
+    nacelle_count: int = Field(default=2, description="Number of underwing turbofans (2 for twinjet, 4 for quadjet)")
+    nacelle_radius: float = Field(default=0.90, description="Nacelle cowl outer radius in meters (diameter ~1.8m)")
+    nacelle_length: float = Field(default=3.80, description="Nacelle length in meters")
+    nacelle_offset_x: float = Field(default=4.80, description="Lateral distance of engine center from fuselage centerline in meters")
+    nacelle_z: float = Field(default=0.0, description="Longitudinal position of nacelle intake lip in meters")
 
 
 class AircraftSemanticSpec(BaseModel):

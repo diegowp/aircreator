@@ -56,6 +56,11 @@ export const HierarchySidebar: React.FC = () => {
         else if (id === 'rudder_2') { displayName = 'Leme de Direção Móvel'; category = 'Controle de Voo'; claBadge = 'CLA 8 (Yaw)'; }
         else if (id === 'helice' || id === 'propeller') { displayName = 'Hélice & Spinner'; category = 'Propulsão'; claBadge = 'CLA 18 (Spin)'; }
         else if (id === 'jet_nozzle') { displayName = 'Bocal de Escape / Exaustor Jet'; category = 'Propulsão'; claBadge = 'NOZZLE'; }
+        else if (id === 'engine_r') { displayName = 'Motor Turbofan Direito (CFM LEAP)'; category = 'Propulsão'; claBadge = 'ENG_R'; }
+        else if (id === 'engine_l') { displayName = 'Motor Turbofan Esquerdo (CFM LEAP)'; category = 'Propulsão'; claBadge = 'ENG_L'; }
+        else if (id === 'winglet_r') { displayName = 'Winglet Direito (Split Scimitar)'; category = 'Superfície Alar'; claBadge = 'WINGLET'; }
+        else if (id === 'winglet_l') { displayName = 'Winglet Esquerdo (Split Scimitar)'; category = 'Superfície Alar'; claBadge = 'WINGLET'; }
+        else if (id === 'dorsal_fin') { displayName = 'Extensão Dorsal (Dorsal Fin)'; category = 'Empenagem'; claBadge = 'FILLET'; }
 
         return {
           id,

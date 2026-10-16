@@ -241,12 +241,27 @@ class FuselageLofter:
         m = self.vertices_per_ring
         n = len(stations)
 
-        # 1. Nose apex vertex (index 0)
-        nose_z = stations[0].z + max(0.1, stations[0].radius_x * 0.8)
-        nose_y = stations[0].y_center
-        nose_apex = SrfVertex(x=0.0, y=nose_y, z=nose_z, round_shading=True)
+        # 1. Aerodynamic Rounded Radome Nose
+        r0_x = max(0.05, stations[0].radius_x)
+        r0_y = max(0.05, stations[0].radius_y)
+        y0_c = stations[0].y_center
+        z0 = stations[0].z
+
+        # Intermediate dome ring (55% radius, rounded dome curve)
+        dome_ring_start = len(all_vertices)
+        dome_z = z0 + r0_x * 0.28
+        for j in range(m):
+            theta = (2.0 * math.pi * j) / m
+            vx = (r0_x * 0.58) * math.sin(theta)
+            vy = y0_c + (r0_y * 0.58) * math.cos(theta)
+            vz = dome_z
+            all_vertices.append(SrfVertex(x=vx, y=vy, z=vz, round_shading=True))
+
+        # Nose apex at tip of rounded dome
+        nose_z = z0 + r0_x * 0.42
+        nose_apex = SrfVertex(x=0.0, y=y0_c, z=nose_z, round_shading=True)
+        nose_idx = len(all_vertices)
         all_vertices.append(nose_apex)
-        nose_idx = 0
 
         # 2. Add all station vertices
         station_start_indices: list[int] = []
@@ -255,24 +270,32 @@ class FuselageLofter:
             station_start_indices.append(start_idx)
             all_vertices.extend(station.vertices)
 
-        # 3. Tail apex vertex
-        tail_z = stations[-1].z - max(0.1, stations[-1].radius_x * 0.8)
+        # 3. Tail apex vertex (APU / tail cone)
+        tail_z = stations[-1].z - max(0.08, stations[-1].radius_x * 0.45)
         tail_y = stations[-1].y_center
         tail_apex = SrfVertex(x=0.0, y=tail_y, z=tail_z, round_shading=True)
         tail_idx = len(all_vertices)
         all_vertices.append(tail_apex)
 
-        # 4. Nose Cap Faces (triangle fan from nose apex to first station)
+        # 4. Nose Cap: Quad strip from station 0 to dome ring, then fan to apex
         s0_start = station_start_indices[0]
         for j in range(m):
             j_next = (j + 1) % m
-            v0 = nose_idx
-            v1 = s0_start + j
-            v2 = s0_start + j_next
-            # Outward normal winding: apex -> v1 -> v2
+            # Quad from station 0 to dome ring
+            v_s0 = s0_start + j
+            v_s0_next = s0_start + j_next
+            v_dome_next = dome_ring_start + j_next
+            v_dome = dome_ring_start + j
             faces.append(
                 SrfFace(
-                    vertex_indices=[v0, v1, v2],
+                    vertex_indices=[v_s0, v_dome, v_dome_next, v_s0_next],
+                    color=self.default_color,
+                )
+            )
+            # Triangle from dome ring to apex
+            faces.append(
+                SrfFace(
+                    vertex_indices=[nose_idx, v_dome, v_dome_next],
                     color=self.default_color,
                 )
             )

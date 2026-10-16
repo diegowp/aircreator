@@ -74,6 +74,49 @@ class TestDynamicReconstructionEndpoints(unittest.TestCase):
         self.assertIn("full_srf", res)
         self.assertIn("spec", res)
 
+    def test_boeing_737_airliner_reconstruction(self):
+        """Test commercial twin-turbofan airliner reconstruction (Boeing 737 MAX 8 style)."""
+        response = self.client.post(
+            "/api/v1/reconstruction/generate-aircraft",
+            json={
+                "blueprint_path": "docs/blueprint.jpg",
+                "wingspan_m": 35.92,
+                "length_m": 39.52,
+                "height_m": 12.3,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        comps = data["component_meshes"]
+
+        # 1. Underwing Turbofan Pods
+        self.assertIn("engine_r", comps, "Should generate starboard turbofan pod")
+        self.assertIn("engine_l", comps, "Should generate port turbofan pod")
+        self.assertGreater(len(comps["engine_r"]["vertices"]), 80)
+        self.assertGreater(len(comps["engine_l"]["vertices"]), 80)
+
+        # 2. Split Scimitar Winglets
+        self.assertIn("winglet_r", comps, "Should generate starboard winglet")
+        self.assertIn("winglet_l", comps, "Should generate port winglet")
+
+        # 3. Dorsal Fin Fillet
+        self.assertIn("dorsal_fin", comps, "Should generate vertical fin dorsal fillet")
+
+        # 4. Fuselage dimensions & stations
+        spec = data["spec"]
+        self.assertEqual(spec["aircraft_type"], "airliner")
+        self.assertEqual(spec["propulsion"]["type"], "jet_pod_underwing")
+        self.assertAlmostEqual(spec["wings"]["sweep_leading_edge_deg"], 25.0, delta=1.0)
+        self.assertTrue(spec["wings"]["has_winglets"])
+        self.assertFalse(spec["fuselage"]["cockpit"]["present"], "Airliners should not have bubble canopies")
+
+        # 5. Clean, uncorrupted wing meshes (water-tight, no face loss)
+        self.assertGreater(len(comps["wing_r"]["faces"]), 20)
+        self.assertGreater(len(comps["wing_l"]["faces"]), 20)
+        self.assertGreater(len(comps["aileron_d"]["faces"]), 2)
+        self.assertGreater(len(comps["aileron_lef"]["faces"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

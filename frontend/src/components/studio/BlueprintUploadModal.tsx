@@ -16,20 +16,20 @@ import { useStudioStore } from '@/store/studioStore';
 
 const PRESETS = [
   {
+    name: 'Boeing 737 MAX 8',
+    preset: 'AIRLINER',
+    wingspan: 35.92,
+    length: 39.52,
+    height: 12.3,
+    category: 'Jato Comercial Bimotor (CFM LEAP)',
+  },
+  {
     name: 'EMB-314 Super Tucano',
     preset: 'SUPER_TUCANO',
     wingspan: 11.14,
     length: 11.38,
     height: 3.97,
     category: 'Ataque Leve / Turboélice',
-  },
-  {
-    name: 'Neiva T-25 Universal',
-    preset: 'TRAINER',
-    wingspan: 9.5,
-    length: 8.6,
-    height: 3.0,
-    category: 'Treinamento Primário',
   },
   {
     name: 'F-15 Eagle / Caça a Jato',
@@ -40,12 +40,12 @@ const PRESETS = [
     category: 'Caça Superioridade Aérea',
   },
   {
-    name: 'EMB-312 Tucano',
+    name: 'Neiva T-25 Universal',
     preset: 'TRAINER',
-    wingspan: 11.14,
-    length: 9.86,
-    height: 3.4,
-    category: 'Treinamento Básico',
+    wingspan: 9.5,
+    length: 8.6,
+    height: 3.0,
+    category: 'Treinamento Primário',
   },
 ];
 
