@@ -3,6 +3,7 @@
 import React from 'react';
 import { OrthographicViewport } from './OrthographicViewport';
 import { PerspectiveViewport } from './PerspectiveViewport';
+import { AnimationControlPanel } from './AnimationControlPanel';
 import { useStudioStore } from '@/store/studioStore';
 
 export const FourQuadrantStudio: React.FC = () => {
@@ -91,6 +92,9 @@ export const FourQuadrantStudio: React.FC = () => {
           blueprintUrl={blueprints.sideUrl}
         />
       </main>
+
+      {/* Flight Control Surfaces & Gear Animation Panel */}
+      <AnimationControlPanel />
     </div>
   );
 };
