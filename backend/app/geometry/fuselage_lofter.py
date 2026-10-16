@@ -241,34 +241,41 @@ class FuselageLofter:
         m = self.vertices_per_ring
         n = len(stations)
 
-        # 1. Aerodynamic Rounded Radome Nose
-        r0_x = max(0.05, stations[0].radius_x)
-        r0_y = max(0.05, stations[0].radius_y)
-        y0_c = stations[0].y_center
-        z0 = stations[0].z
-
-        # Intermediate dome ring (55% radius, rounded dome curve)
-        dome_ring_start = len(all_vertices)
-        dome_z = z0 + r0_x * 0.28
-        for j in range(m):
-            theta = (2.0 * math.pi * j) / m
-            vx = (r0_x * 0.58) * math.sin(theta)
-            vy = y0_c + (r0_y * 0.58) * math.cos(theta)
-            vz = dome_z
-            all_vertices.append(SrfVertex(x=vx, y=vy, z=vz, round_shading=True))
-
-        # Nose apex at tip of rounded dome
-        nose_z = z0 + r0_x * 0.42
-        nose_apex = SrfVertex(x=0.0, y=y0_c, z=nose_z, round_shading=True)
-        nose_idx = len(all_vertices)
-        all_vertices.append(nose_apex)
-
-        # 2. Add all station vertices
+        # 1. Add all station vertices first
         station_start_indices: list[int] = []
         for station in stations:
             start_idx = len(all_vertices)
             station_start_indices.append(start_idx)
             all_vertices.extend(station.vertices)
+
+        # 2. Aerodynamic Ellipsoidal Radome Nose (Multi-Ring Quad Dome)
+        r0_x = max(0.05, stations[0].radius_x)
+        r0_y = max(0.05, stations[0].radius_y)
+        # Maintain circular or near-circular cross-section to eliminate front-view egg distortion
+        r0_y_radome = min(r0_y, r0_x * 1.05)
+        y0_c = stations[0].y_center
+        z0 = stations[0].z
+        l_dome = r0_x * 0.65
+
+        k_dome = 3
+        dome_ring_starts: list[int] = []
+        for k in range(1, k_dome + 1):
+            u = k / (k_dome + 0.35)
+            phi = u * (math.pi / 2.0)
+            r_scale = math.cos(phi)
+            z_k = z0 + l_dome * math.sin(phi)
+            rx_k = r0_x * r_scale
+            ry_k = r0_y_radome * r_scale
+            yc_k = y0_c - (0.05 * r0_y_radome) * math.sin(phi)
+
+            r_start = len(all_vertices)
+            dome_ring_starts.append(r_start)
+            for j in range(m):
+                theta = (2.0 * math.pi * j) / m
+                vx = rx_k * math.sin(theta)
+                vy = yc_k + ry_k * math.cos(theta)
+                vz = z_k
+                all_vertices.append(SrfVertex(x=vx, y=vy, z=vz, round_shading=True))
 
         # 3. Tail apex vertex (APU / tail cone)
         tail_z = stations[-1].z - max(0.08, stations[-1].radius_x * 0.45)
@@ -277,25 +284,45 @@ class FuselageLofter:
         tail_idx = len(all_vertices)
         all_vertices.append(tail_apex)
 
-        # 4. Nose Cap: Quad strip from station 0 to dome ring, then fan to apex
+        # 4. Nose Quad Strips and Pure Quad Cap (Zero Apex Vertex, Zero Spoke Fan)
         s0_start = station_start_indices[0]
+        r1_start = dome_ring_starts[0]
         for j in range(m):
             j_next = (j + 1) % m
-            # Quad from station 0 to dome ring
-            v_s0 = s0_start + j
-            v_s0_next = s0_start + j_next
-            v_dome_next = dome_ring_start + j_next
-            v_dome = dome_ring_start + j
             faces.append(
                 SrfFace(
-                    vertex_indices=[v_s0, v_dome, v_dome_next, v_s0_next],
+                    vertex_indices=[s0_start + j, r1_start + j, r1_start + j_next, s0_start + j_next],
                     color=self.default_color,
                 )
             )
-            # Triangle from dome ring to apex
+
+        for k in range(k_dome - 1):
+            curr_start = dome_ring_starts[k]
+            next_start = dome_ring_starts[k + 1]
+            for j in range(m):
+                j_next = (j + 1) % m
+                faces.append(
+                    SrfFace(
+                        vertex_indices=[curr_start + j, next_start + j, next_start + j_next, curr_start + j_next],
+                        color=self.default_color,
+                    )
+                )
+
+        # Cap tip dome ring with pure quad faces (counter-clockwise outward facing +Z)
+        tip_start = dome_ring_starts[-1]
+        for i in range(m // 2 - 1):
+            v0 = (m - 1 - i) % m
+            v1 = i
+            v2 = i + 1
+            v3 = m - 2 - i
             faces.append(
                 SrfFace(
-                    vertex_indices=[nose_idx, v_dome, v_dome_next],
+                    vertex_indices=[
+                        tip_start + v3,
+                        tip_start + v2,
+                        tip_start + v1,
+                        tip_start + v0,
+                    ],
                     color=self.default_color,
                 )
             )

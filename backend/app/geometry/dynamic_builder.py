@@ -121,11 +121,11 @@ def build_turbofan_nacelle_mesh(
         faces.append(SrfFace(vertex_indices=[ex_idx, r_last + j_next, r_last + j], color=(35, 36, 42)))
 
     # Mounting Pylon (strut connecting top of nacelle to wing lower surface)
-    top_y = pylon_top_y if pylon_top_y is not None else (center_y + nacelle_radius + 0.60)
-    bot_y = center_y + nacelle_radius * 0.85
-    pylon_fwd_z = intake_z - 0.20 * nacelle_length
-    pylon_aft_z = intake_z - 0.85 * nacelle_length
-    pw = 0.10
+    top_y = pylon_top_y if pylon_top_y is not None else (center_y + nacelle_radius + 0.35)
+    bot_y = center_y + nacelle_radius * 0.70
+    pylon_fwd_z = intake_z - 0.25 * nacelle_length
+    pylon_aft_z = intake_z - 0.90 * nacelle_length
+    pw = 0.12
 
     pv_start = len(all_vertices)
     p_pts = [
@@ -476,8 +476,9 @@ def build_aircraft_from_semantic_spec(
         wing_st_y = w.root_y + span_dist * math.sin(dihedral_rad)
         wing_st_z = w.root_z - span_dist * math.sin(sweep_rad)
 
-        intake_z = spec.propulsion.nacelle_z if (spec.propulsion.nacelle_z and spec.propulsion.nacelle_z != 0.0) else (wing_st_z + 1.25)
-        center_y = wing_st_y - nacelle_radius * 1.15
+        intake_z = spec.propulsion.nacelle_z if (spec.propulsion.nacelle_z and spec.propulsion.nacelle_z != 0.0) else (wing_st_z + 1.85)
+        center_y = wing_st_y - nacelle_radius * 0.70
+        pylon_top = wing_st_y + 0.18
 
         engine_r_mesh = build_turbofan_nacelle_mesh(
             nacelle_name="engine_r",
@@ -486,7 +487,7 @@ def build_aircraft_from_semantic_spec(
             center_y=center_y,
             nacelle_radius=nacelle_radius,
             nacelle_length=nacelle_length,
-            pylon_top_y=wing_st_y,
+            pylon_top_y=pylon_top,
         )
         engine_l_mesh = build_turbofan_nacelle_mesh(
             nacelle_name="engine_l",
@@ -495,7 +496,7 @@ def build_aircraft_from_semantic_spec(
             center_y=center_y,
             nacelle_radius=nacelle_radius,
             nacelle_length=nacelle_length,
-            pylon_top_y=wing_st_y,
+            pylon_top_y=pylon_top,
         )
         components_to_merge.extend([engine_r_mesh, engine_l_mesh])
 

@@ -117,6 +117,15 @@ class TestDynamicReconstructionEndpoints(unittest.TestCase):
         self.assertGreater(len(comps["aileron_d"]["faces"]), 2)
         self.assertGreater(len(comps["aileron_lef"]["faces"]), 2)
 
+        # 6. Symmetrical Horizontal Stabilizers & Elevators (Port & Starboard)
+        elev_1_xs = [v[0] for v in comps["elevator_1"]["vertices"]]
+        self.assertLess(min(elev_1_xs), -4.0, "Fixed stabilizer must cover port side")
+        self.assertGreater(max(elev_1_xs), 4.0, "Fixed stabilizer must cover starboard side")
+
+        elev_xs = [v[0] for v in comps["elevator"]["vertices"]]
+        self.assertLess(min(elev_xs), -4.0, "Movable elevator must cover port side")
+        self.assertGreater(max(elev_xs), 4.0, "Movable elevator must cover starboard side")
+
 
 if __name__ == "__main__":
     unittest.main()

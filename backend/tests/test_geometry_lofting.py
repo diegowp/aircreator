@@ -32,11 +32,11 @@ class TestGeometryLofting(unittest.TestCase):
 
         mesh = lofter.loft_fuselage_mesh(profile, mesh_name="synthetic_fuselage")
 
-        # 1 apex nose + 1 dome ring (12) + 16*12 stations + 1 apex tail = 206 vertices
-        self.assertEqual(len(mesh.vertices), 206)
+        # 3 dome rings (3*12) + 16*12 stations + 1 apex tail = 229 vertices (zero apex cone)
+        self.assertEqual(len(mesh.vertices), 229)
 
-        # 12 nose quads + 12 nose triangles + 15*12 quads + 12 tail triangles = 216 faces
-        self.assertEqual(len(mesh.faces), 216)
+        # 3*12 nose quads + 5 nose tip quads + 15*12 body quads + 12 tail triangles = 233 faces
+        self.assertEqual(len(mesh.faces), 233)
 
         # Body vertices must have round shading (Round Shading 'R' flag)
         round_count = sum(1 for v in mesh.vertices if v.round_shading)

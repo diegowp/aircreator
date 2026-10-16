@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from app.geometry.mesh_ops import merge_meshes
 from app.geometry.part_slicer import PartSlicer
 from app.parsers.dnm import DnmNode, DnmPos, DnmState, DynaModel
 from app.parsers.srf import SurfaceMesh
@@ -91,15 +92,34 @@ class KinematicsRiggingEngine:
             is_vertical=False,
         )
 
-        # 2. Slice Elevator from Horizontal Stabilizer Right
-        sliced_h_stab = self.slicer.slice_trailing_edge_surface(
+        # 2. Slice Elevator from Horizontal Stabilizer (Right & Left)
+        sliced_h_stab_r = self.slicer.slice_trailing_edge_surface(
             h_stab_r_mesh,
             chord_cut_fraction=0.60,
             span_start_fraction=0.05,
-            span_end_fraction=0.95,
-            movable_name="elevator",
-            fixed_name="elevator_1",
+            span_end_fraction=0.98,
+            movable_name="elevator_r",
+            fixed_name="elevator_1_r",
             is_vertical=False,
+        )
+
+        sliced_h_stab_l = self.slicer.slice_trailing_edge_surface(
+            h_stab_l_mesh,
+            chord_cut_fraction=0.60,
+            span_start_fraction=0.02,
+            span_end_fraction=0.95,
+            movable_name="elevator_l",
+            fixed_name="elevator_1_l",
+            is_vertical=False,
+        )
+
+        fixed_h_stab_mesh = merge_meshes(
+            [sliced_h_stab_r.fixed_mesh, sliced_h_stab_l.fixed_mesh],
+            merged_name="elevator_1",
+        )
+        movable_h_stab_mesh = merge_meshes(
+            [sliced_h_stab_r.movable_mesh, sliced_h_stab_l.movable_mesh],
+            merged_name="elevator",
         )
 
         # 3. Slice Rudder from Vertical Fin
@@ -119,8 +139,8 @@ class KinematicsRiggingEngine:
         model.embed_mesh("wing_l.srf", sliced_wing_l.fixed_mesh)
         model.embed_mesh("aileron_d.srf", sliced_wing_r.movable_mesh)
         model.embed_mesh("aileron_lef.srf", sliced_wing_l.movable_mesh)
-        model.embed_mesh("elevator_1.srf", sliced_h_stab.fixed_mesh)
-        model.embed_mesh("elevator.srf", sliced_h_stab.movable_mesh)
+        model.embed_mesh("elevator_1.srf", fixed_h_stab_mesh)
+        model.embed_mesh("elevator.srf", movable_h_stab_mesh)
         model.embed_mesh("rudder_1.srf", sliced_v_fin.fixed_mesh)
         model.embed_mesh("rudder_2.srf", sliced_v_fin.movable_mesh)
 
@@ -233,7 +253,11 @@ class KinematicsRiggingEngine:
 
         # Movable Elevator: CLA 6 (Pitch: 3 States: Neutral, Pitch UP, Pitch DOWN)
         elev_angle16 = degrees_to_angle16(elevator_deflection_deg)
-        cnt_elevator = sliced_h_stab.hinge_center
+        cnt_elevator = (
+            0.0,
+            float(sliced_h_stab_r.hinge_center[1]),
+            float(sliced_h_stab_r.hinge_center[2]),
+        )
         node_elevator = DnmNode(
             name="elevator",
             fil="elevator.srf",
@@ -310,12 +334,12 @@ class KinematicsRiggingEngine:
                 "cla": 7,
             },
             "elevator_1": {
-                "mesh": sliced_h_stab.fixed_mesh,
+                "mesh": fixed_h_stab_mesh,
                 "pivot": (0.0, 0.0, 0.0),
                 "cla": 0,
             },
             "elevator": {
-                "mesh": sliced_h_stab.movable_mesh,
+                "mesh": movable_h_stab_mesh,
                 "pivot": cnt_elevator,
                 "cla": 6,
             },

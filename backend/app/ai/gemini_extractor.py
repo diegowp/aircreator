@@ -212,13 +212,15 @@ Output the result strictly adhering to the JSON schema.
             for i, z in enumerate(z_coords):
                 u = float(i / (num_stations - 1))
                 if u < 0.18:
-                    # Aerodynamic rounded radome (elliptic expansion from blunt tip)
+                    # Aerodynamic rounded radome (circular cross-section with subtle droop)
                     radome_tip = 0.38
                     env = radome_tip + (1.0 - radome_tip) * math.sqrt(max(0.0, u / 0.18))
                     half_w = (max_w / 2.0) * env
-                    half_h = (max_h / 2.0) * env
-                    y_top = (max_h / 2.0) * (0.45 + 0.55 * math.sqrt(max(0.0, u / 0.18)))
-                    y_bot = -half_h * (0.60 + 0.40 * (u / 0.18))
+                    # Circular radome cross-section (eliminates front-view egg distortion)
+                    radome_r = half_w
+                    yc = (max_h / 2.0) * (0.04 - 0.10 * (1.0 - math.sqrt(max(0.0, u / 0.18))))
+                    y_top = yc + radome_r
+                    y_bot = yc - radome_r
                 elif u <= 0.72:
                     # Constant Passenger Cabin Tube
                     half_w = max_w / 2.0
@@ -300,8 +302,8 @@ Output the result strictly adhering to the JSON schema.
                 nacelle_radius=0.92,  # CFM LEAP-1B 1.84m cowl diameter
                 nacelle_length=3.80,
                 nacelle_offset_x=round(wingspan_m * 0.28, 3),  # Underwing position
-                nacelle_z=round(wings.root_z + 1.20, 3),  # Forward slung underwing
-                thrustline_y=round(-max_h * 0.42, 3),
+                nacelle_z=round(wings.root_z + 1.85, 3),  # Forward slung underwing (LEAP-1B)
+                thrustline_y=round(wings.root_y - 0.70 * 0.92, 3),
             )
 
             return AircraftSemanticSpec(
