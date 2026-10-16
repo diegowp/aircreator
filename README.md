@@ -92,13 +92,30 @@ curl -X POST "http://localhost:8000/api/v1/export/ysflight-zip" \
 
 ---
 
+## 💻 Como Executar o Projeto Localmente
+
+### 1. Iniciar o Backend (FastAPI na porta 8000)
+A partir da raiz do projeto:
+```powershell
+python -m uvicorn app.main:app --app-dir backend --reload --port 8000
+```
+> O backend estará disponível em `http://localhost:8000` e a documentação interativa OpenAPI em `http://localhost:8000/docs`.
+
+### 2. Iniciar o Frontend Studio (Next.js na porta 3000)
+Em um novo terminal PowerShell:
+```powershell
+cd frontend
+pnpm dev
+```
+> Acesse o estúdio 3D interativo no seu navegador em `http://localhost:3000`.
+
+---
+
 ## 🧪 Executando os Testes Automatizados
 
 O backend conta com uma suíte de 32 testes unitários e de integração de ponta a ponta:
-```bash
-cd backend
-$env:PYTHONPATH='backend'
-python -m unittest discover -s tests
+```powershell
+python -m unittest discover -s backend/tests -t backend
 ```
 
 ---
