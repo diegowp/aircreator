@@ -99,12 +99,12 @@ class AeroPhysicsCalibrator:
 
         aspect_ratio = (wingspan**2) / max(1.0, wing_area)
         mac = wing_area / max(1.0, wingspan)
-
-        # Collision sphere radius: maximum distance from centroid + 5% margin
         cx, cy, cz = metrics["centroid"]
+
+        # Collision sphere radius: maximum distance from origin (0,0,0) + 5% margin
         max_dist_sq = 0.0
         for v in aircraft_mesh.vertices:
-            dist_sq = (v.x - cx) ** 2 + (v.y - cy) ** 2 + (v.z - cz) ** 2
+            dist_sq = (v.x) ** 2 + (v.y) ** 2 + (v.z) ** 2
             if dist_sq > max_dist_sq:
                 max_dist_sq = dist_sq
         htradius = math.sqrt(max_dist_sq) * 1.05
