@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class GeminiBlueprintExtractor:
     """Multimodal aerospace blueprint analyzer using Gemini Vision."""
 
-    def __init__(self, api_key: str | None = None, model_name: str = "gemini-3.8-flash"):
+    def __init__(self, api_key: str | None = None, model_name: str = "gemini-3.6-flash"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.model_name = model_name
 
@@ -125,6 +125,11 @@ Analyze the provided orthographic drawing of the aircraft '{aircraft_name}'.
 Approximate overall dimensions: Wingspan={wingspan_m:.2f}m, Length={length_m:.2f}m, Height={height_m:.2f}m.
 
 CRITICAL AERONAUTICAL EXTRACTION RULES:
+0. PARADIGM - INVERSE PROCEDURAL MODELING:
+   - NEVER output 3D vertex meshes, face indices, or obj/stl coordinate dumps.
+   - Extract strictly numerical, scalar aeronautical parameters (dimensions, sweep degrees, station curves, dimensionless fractions).
+   - Downstream deterministic mathematical engines will construct 100% of the 3D geometry from your numbers.
+
 1. AIRCRAFT CLASSIFICATION & PROPULSION:
    - Identify aircraft_type: 'airliner' (for commercial passenger jets like Boeing 737, 777, A320), 'fighter_jet', 'trainer', 'cargo', 'glider'.
    - Determine engine type (propulsion.type):
@@ -245,6 +250,7 @@ Output the result strictly adhering to the JSON schema.
                         y_top_m=round(y_top, 3),
                         y_bot_m=round(y_bot, 3),
                         half_width_m=round(half_w, 3),
+                        superellipse_n=2.6,
                     )
                 )
 
@@ -267,6 +273,9 @@ Output the result strictly adhering to the JSON schema.
                 root_y=round(-max_h * 0.38, 3),
                 root_z=round(nose_z - length_m * 0.43, 3),
                 thickness_ratio=0.12,
+                camber=0.02,
+                camber_pos=0.4,
+                washout_deg=-1.5,
                 kink_eta=0.36,  # Trailing edge Yehudi break (~36% span, near engine)
                 has_winglets=True,
                 winglet_height_m=1.45,
@@ -352,6 +361,7 @@ Output the result strictly adhering to the JSON schema.
                     y_top_m=round(y_top, 3),
                     y_bot_m=round(y_bot, 3),
                     half_width_m=round(half_w, 3),
+                    superellipse_n=2.0,
                 )
             )
 
@@ -376,6 +386,9 @@ Output the result strictly adhering to the JSON schema.
             tip_chord_m=round(tip_chord, 3),
             sweep_leading_edge_deg=32.0 if is_fighter else 5.0,
             dihedral_deg=2.0 if is_fighter else 4.5,
+            camber=0.0 if is_fighter else 0.015,
+            camber_pos=0.4,
+            washout_deg=-1.0 if is_fighter else -1.5,
             root_x=round(max_w * 0.5, 3),
             root_y=-0.10,
             root_z=round(nose_z - length_m * 0.40, 3),

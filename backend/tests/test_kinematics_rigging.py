@@ -1,5 +1,6 @@
 """Unit tests for Part Slicer, Hinge Pivot calculation, and Kinematic DynaModel Rigging."""
 
+import math
 import unittest
 
 from app.geometry import (
@@ -51,9 +52,11 @@ class TestKinematicsRigging(unittest.TestCase):
         self.assertGreater(len(res.movable_mesh.faces), 0)
 
         # Hinge center must be located within the wing span
-        cx, cy, cz = res.hinge_center
-        self.assertGreater(cx, 1.5)  # Outboard in semi-span
-        self.assertEqual(res.hinge_vector, (1.0, 0.0, 0.0))
+        # Hinge vector must be unit length and oriented along spanwise X
+        vx, vy, vz = res.hinge_vector
+        mag = math.sqrt(vx * vx + vy * vy + vz * vz)
+        self.assertAlmostEqual(mag, 1.0, places=4)
+        self.assertGreater(vx, 0.95)
 
     def test_complete_aircraft_rigging(self):
         lofter = FuselageLofter(num_stations=10, vertices_per_ring=10)

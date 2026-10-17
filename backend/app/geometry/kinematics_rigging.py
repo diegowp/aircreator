@@ -156,6 +156,8 @@ class KinematicsRiggingEngine:
         fuselage_children = ["wing_r", "wing_l", "elevator_1", "rudder_1"]
         if canopy_mesh:
             fuselage_children.append("canopy")
+        if propeller_mesh:
+            fuselage_children.append("helice")
 
         node_fuselage = DnmNode(
             name="fuselage",
@@ -205,6 +207,8 @@ class KinematicsRiggingEngine:
 
         # Aileron Right: CLA 7 (3 States: Neutral, Roll Right, Roll Left)
         # Roll Right: TE UP (Pitch positive angle around CNT)
+        # Aileron Right: CLA 7 (3 States: Neutral, Roll Right, Roll Left)
+        # Roll Right: TE UP (Pitch positive angle around CNT)
         aileron_angle16 = degrees_to_angle16(aileron_deflection_deg)
         cnt_aileron_r = sliced_wing_r.hinge_center
         node_aileron_r = DnmNode(
@@ -213,6 +217,7 @@ class KinematicsRiggingEngine:
             cla=7,
             nst=3,
             cnt=cnt_aileron_r,
+            pax=sliced_wing_r.hinge_vector,
             rel="DEP",
             states=[
                 DnmState(0, 0, 0, 0, 0, 0, 1),  # Neutral
@@ -230,6 +235,7 @@ class KinematicsRiggingEngine:
             cla=7,
             nst=3,
             cnt=cnt_aileron_l,
+            pax=sliced_wing_l.hinge_vector,
             rel="DEP",
             states=[
                 DnmState(0, 0, 0, 0, 0, 0, 1),  # Neutral
@@ -264,6 +270,7 @@ class KinematicsRiggingEngine:
             cla=6,
             nst=3,
             cnt=cnt_elevator,
+            pax=(1.0, 0.0, 0.0),
             rel="DEP",
             states=[
                 DnmState(0, 0, 0, 0, 0, 0, 1),  # Neutral
@@ -294,6 +301,7 @@ class KinematicsRiggingEngine:
             cla=8,
             nst=3,
             cnt=cnt_rudder,
+            pax=sliced_v_fin.hinge_vector,
             rel="DEP",
             states=[
                 DnmState(0, 0, 0, 0, 0, 0, 1),  # Neutral
@@ -306,6 +314,17 @@ class KinematicsRiggingEngine:
         # Record rigged components for API & WebGL rendering
         (min_x, min_y, min_z), (max_x, max_y, max_z) = fuselage_mesh.bounding_box()
         nose_spinner = (0.0, 0.0, max_z + 0.1)
+
+        if propeller_mesh:
+            node_prop = DnmNode(
+                name="helice",
+                fil="helice.srf",
+                cla=18,
+                cnt=nose_spinner,
+                pax=(0.0, 0.0, 1.0),
+                rel="DEP",
+            )
+            model.add_node(node_prop, parent_name="fuselage")
 
         self.last_rigged_components = {
             "fuselagem": {

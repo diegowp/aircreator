@@ -57,6 +57,7 @@ class DnmNode:
     states: list[DnmState] = field(default_factory=list)
     pos: DnmPos = field(default_factory=DnmPos)
     cnt: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    pax: tuple[float, float, float] | None = None
     rel: str = "DEP"  # DEP or IND
     children: list[str] = field(default_factory=list)
 
@@ -126,6 +127,9 @@ class DynaModel:
         # Mirror CNT
         mirrored_cnt = (-source.cnt[0], source.cnt[1], source.cnt[2])
 
+        # Mirror PAX (rotation axis)
+        mirrored_pax = (-source.pax[0], source.pax[1], source.pax[2]) if source.pax else None
+
         # Mirror mesh if available
         mirrored_mesh = None
         source_mesh = source.mesh or self.pck_meshes.get(source.fil)
@@ -142,6 +146,7 @@ class DynaModel:
             states=mirrored_states,
             pos=mirrored_pos,
             cnt=mirrored_cnt,
+            pax=mirrored_pax,
             rel=source.rel,
             children=[],
         )
@@ -182,6 +187,8 @@ class DynaModel:
                 f"POS {node.pos.x:.4f} {node.pos.y:.4f} {node.pos.z:.4f} {node.pos.h} {node.pos.p} {node.pos.b} {node.pos.vis}"
             )
             lines.append(f"CNT {node.cnt[0]:.4f} {node.cnt[1]:.4f} {node.cnt[2]:.4f}")
+            if node.pax is not None:
+                lines.append(f"PAX {node.pax[0]:.6f} {node.pax[1]:.6f} {node.pax[2]:.6f}")
             lines.append(f"REL {node.rel}")
             lines.append(f"NCH {len(node.children)}")
             for child in node.children:
@@ -284,6 +291,10 @@ def parse_dnm_text(text: str) -> DynaModel:
                     if len(n_tokens) >= 4:
                         cx, cy, cz = float(n_tokens[1]), float(n_tokens[2]), float(n_tokens[3])
                         node.cnt = (cx, cy, cz)
+                elif n_cmd == "PAX":
+                    if len(n_tokens) >= 4:
+                        ax, ay, az = float(n_tokens[1]), float(n_tokens[2]), float(n_tokens[3])
+                        node.pax = (ax, ay, az)
                 elif n_cmd == "REL":
                     if len(n_tokens) >= 2:
                         node.rel = n_tokens[1].upper()

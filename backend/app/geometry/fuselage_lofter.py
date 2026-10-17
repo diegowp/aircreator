@@ -27,6 +27,7 @@ class FuselageStation:
     radius_x: float  # Lateral half-width in meters
     radius_y: float  # Vertical half-height in meters
     camber_bias: float = 0.0  # Optional offset for flatter belly / bulbous canopy
+    superellipse_n: float = 2.0  # Lamé curve exponent (2.0=ellipse, 2.5-3.2=squarish airliner)
     vertices: list[SrfVertex] = field(default_factory=list)
 
 
@@ -36,6 +37,7 @@ class LoftingProfileData:
     y_dorsal: list[float]  # Top edge of fuselage at each Z
     y_ventral: list[float]  # Bottom edge of fuselage at each Z
     x_widths: list[float]  # Half-width (radius_x) at each Z
+    superellipse_n: list[float] | None = None  # Superellipse exponent per station
 
 
 class FuselageLofter:
@@ -184,6 +186,112 @@ class FuselageLofter:
             x_widths=x_widths,
         )
 
+    @staticmethod
+    def monotone_cubic_interpolate(
+        x_in: list[float], y_in: list[float], x_out: list[float]
+    ) -> list[float]:
+        """
+        Fritsch-Carlson Monotone Cubic Hermite Interpolation.
+        Guarantees monotonicity and zero spurious oscillations/overshoot, preserving
+        exact cross-section dimensions between stations.
+        """
+        n = len(x_in)
+        if n <= 1:
+            return [y_in[0] if y_in else 0.0] * len(x_out)
+        if n == 2:
+            return [float(v) for v in np.interp(x_out, x_in, y_in)]
+
+        # Ensure strictly ascending x for spline calculation
+        is_descending = x_in[0] > x_in[-1]
+        if is_descending:
+            x_pts = list(reversed(x_in))
+            y_pts = list(reversed(y_in))
+        else:
+            x_pts = list(x_in)
+            y_pts = list(y_in)
+
+        x_arr = np.array(x_pts, dtype=float)
+        y_arr = np.array(y_pts, dtype=float)
+        dx = np.diff(x_arr)
+        dy = np.diff(y_arr)
+        slopes = dy / np.where(dx == 0, 1e-12, dx)
+
+        # Tangents at data points
+        m_slopes = np.zeros(n, dtype=float)
+        m_slopes[0] = slopes[0]
+        m_slopes[-1] = slopes[-1]
+        for i in range(1, n - 1):
+            if slopes[i - 1] * slopes[i] <= 0:
+                m_slopes[i] = 0.0
+            else:
+                m_slopes[i] = (slopes[i - 1] + slopes[i]) / 2.0
+
+        # Fritsch-Carlson condition
+        for i in range(n - 1):
+            if slopes[i] == 0:
+                m_slopes[i] = 0.0
+                m_slopes[i + 1] = 0.0
+            else:
+                alpha = m_slopes[i] / slopes[i]
+                beta = m_slopes[i + 1] / slopes[i]
+                s = alpha * alpha + beta * beta
+                if s > 9.0:
+                    tau = 3.0 / math.sqrt(s)
+                    m_slopes[i] = tau * alpha * slopes[i]
+                    m_slopes[i + 1] = tau * beta * slopes[i]
+
+        # Evaluate at x_out
+        res: list[float] = []
+        for x_val in x_out:
+            if x_val <= x_arr[0]:
+                res.append(float(y_arr[0]))
+            elif x_val >= x_arr[-1]:
+                res.append(float(y_arr[-1]))
+            else:
+                idx = int(np.searchsorted(x_arr, x_val)) - 1
+                idx = max(0, min(n - 2, idx))
+                h = x_arr[idx + 1] - x_arr[idx]
+                t = (x_val - x_arr[idx]) / max(1e-12, h)
+                t2 = t * t
+                t3 = t2 * t
+                h00 = 2 * t3 - 3 * t2 + 1
+                h10 = t3 - 2 * t2 + t
+                h01 = -2 * t3 + 3 * t2
+                h11 = t3 - t2
+                y_eval = (
+                    h00 * y_arr[idx]
+                    + h10 * h * m_slopes[idx]
+                    + h01 * y_arr[idx + 1]
+                    + h11 * h * m_slopes[idx + 1]
+                )
+                res.append(float(y_eval))
+
+        return res
+
+    def smooth_interpolate_profile(
+        self, profile: LoftingProfileData, target_num_stations: int = 18
+    ) -> LoftingProfileData:
+        """Interpolate coarse profile into target_num_stations with monotonic cubic splines."""
+        if len(profile.z_coords) >= target_num_stations or len(profile.z_coords) < 3:
+            return profile
+
+        z_new = np.linspace(profile.z_coords[0], profile.z_coords[-1], target_num_stations).tolist()
+        y_dorsal_new = self.monotone_cubic_interpolate(profile.z_coords, profile.y_dorsal, z_new)
+        y_ventral_new = self.monotone_cubic_interpolate(profile.z_coords, profile.y_ventral, z_new)
+        x_widths_new = self.monotone_cubic_interpolate(profile.z_coords, profile.x_widths, z_new)
+
+        super_n_new: list[float] | None = None
+        if profile.superellipse_n:
+            super_n_new = self.monotone_cubic_interpolate(profile.z_coords, profile.superellipse_n, z_new)
+
+        return LoftingProfileData(
+            z_coords=z_new,
+            y_dorsal=y_dorsal_new,
+            y_ventral=y_ventral_new,
+            x_widths=x_widths_new,
+            superellipse_n=super_n_new,
+        )
+
     def create_station_rings(self, profile: LoftingProfileData) -> list[FuselageStation]:
         """Compute 3D vertices for each cross-section station ring around the fuselage."""
         stations: list[FuselageStation] = []
@@ -198,23 +306,34 @@ class FuselageLofter:
             ry = max(0.02, (y_top - y_bot) / 2.0)
             yc = (y_top + y_bot) / 2.0
 
+            n_val = 2.0
+            if profile.superellipse_n and i < len(profile.superellipse_n):
+                n_val = max(1.0, profile.superellipse_n[i])
+
             station = FuselageStation(
                 station_index=i,
                 z=z,
                 y_center=yc,
                 radius_x=rx,
                 radius_y=ry,
+                superellipse_n=n_val,
             )
+
+            p_exp = 2.0 / n_val
 
             # Generate M vertices around the ring
             # Angle 0 starts at Top (Dorsal: X=0, Y=max), going clockwise
             # YSFlight left-handed: +X right, +Y up, +Z front
             for j in range(m):
                 theta = (2.0 * math.pi * j) / m
-                # X = radius_x * sin(theta) (positive for starboard, negative for port)
-                # Y = y_center + radius_y * cos(theta)
-                vx = rx * math.sin(theta)
-                vy = yc + ry * math.cos(theta)
+                cos_t = math.cos(theta)
+                sin_t = math.sin(theta)
+
+                # Lamé superellipse calculation (reduces to standard circle/ellipse when n_val=2.0)
+                sgn_sin = 1.0 if sin_t >= 0 else -1.0
+                sgn_cos = 1.0 if cos_t >= 0 else -1.0
+                vx = rx * sgn_sin * (abs(sin_t) ** p_exp)
+                vy = yc + ry * sgn_cos * (abs(cos_t) ** p_exp)
                 vz = z
 
                 # Vertices on curved fuselage body have Round Shading ('R' flag)

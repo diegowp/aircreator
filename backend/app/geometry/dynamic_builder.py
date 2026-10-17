@@ -21,19 +21,32 @@ from app.parsers.srf import SrfFace, SrfVertex, SurfaceMesh
 
 def build_fuselage_from_spec(spec: AircraftSemanticSpec, vertices_per_ring: int = 24) -> SurfaceMesh:
     """Build fuselage mesh directly from station cross-sections in spec."""
-    lofter = FuselageLofter(num_stations=len(spec.fuselage.stations), vertices_per_ring=vertices_per_ring)
-
     z_coords = [s.z_m for s in spec.fuselage.stations]
     y_dorsal = [s.y_top_m for s in spec.fuselage.stations]
     y_ventral = [s.y_bot_m for s in spec.fuselage.stations]
     x_widths = [s.half_width_m for s in spec.fuselage.stations]
+
+    default_n = 2.6 if spec.aircraft_type in ("airliner", "cargo") else 2.0
+    super_n = [
+        getattr(s, "superellipse_n", default_n)
+        if getattr(s, "superellipse_n", 2.0) != 2.0
+        else default_n
+        for s in spec.fuselage.stations
+    ]
 
     profile = LoftingProfileData(
         z_coords=z_coords,
         y_dorsal=y_dorsal,
         y_ventral=y_ventral,
         x_widths=x_widths,
+        superellipse_n=super_n,
     )
+
+    target_stations = max(18, len(z_coords))
+    lofter = FuselageLofter(num_stations=target_stations, vertices_per_ring=vertices_per_ring)
+    if len(z_coords) < target_stations:
+        profile = lofter.smooth_interpolate_profile(profile, target_num_stations=target_stations)
+
     return lofter.loft_fuselage_mesh(profile, mesh_name="fuselagem")
 
 
@@ -389,6 +402,9 @@ def build_aircraft_from_semantic_spec(
         tip_chord_m=w.tip_chord_m,
         sweep_deg=w.sweep_leading_edge_deg,
         dihedral_deg=w.dihedral_deg,
+        washout_deg=getattr(w, "washout_deg", -1.5),
+        camber=getattr(w, "camber", 0.0),
+        camber_pos=getattr(w, "camber_pos", 0.4),
         root_x=wing_root_x,
         root_y=wing_root_y,
         root_z=w.root_z,

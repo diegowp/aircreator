@@ -131,17 +131,45 @@ class PartSlicer:
                 )
 
         # Calculate Hinge Center & Direction Vector
-        if hinge_pts:
+        if len(hinge_pts) >= 2:
+            if is_vertical:
+                sorted_pts = sorted(hinge_pts, key=lambda pt: pt.y)
+            else:
+                sorted_pts = sorted(hinge_pts, key=lambda pt: abs(pt.x))
+
+            # Sample root-most cluster and tip-most cluster for stable orientation
+            k_pts = max(1, len(sorted_pts) // 5)
+            root_pts = sorted_pts[:k_pts]
+            tip_pts = sorted_pts[-k_pts:]
+
+            rx_avg = sum(p.x for p in root_pts) / len(root_pts)
+            ry_avg = sum(p.y for p in root_pts) / len(root_pts)
+            rz_avg = sum(p.z for p in root_pts) / len(root_pts)
+
+            tx_avg = sum(p.x for p in tip_pts) / len(tip_pts)
+            ty_avg = sum(p.y for p in tip_pts) / len(tip_pts)
+            tz_avg = sum(p.z for p in tip_pts) / len(tip_pts)
+
+            dx = tx_avg - rx_avg
+            dy = ty_avg - ry_avg
+            dz = tz_avg - rz_avg
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            if dist > 1e-4:
+                hinge_vector = (dx / dist, dy / dist, dz / dist)
+            else:
+                hinge_vector = (0.0, 1.0, 0.0) if is_vertical else (1.0, 0.0, 0.0)
+
             cx = sum(v.x for v in hinge_pts) / len(hinge_pts)
             cy = sum(v.y for v in hinge_pts) / len(hinge_pts)
             cz = sum(v.z for v in hinge_pts) / len(hinge_pts)
             hinge_center = (cx, cy, cz)
-
-            # Direction along span
-            if is_vertical:
-                hinge_vector = (0.0, 1.0, 0.0)
-            else:
-                hinge_vector = (1.0, 0.0, 0.0)
+        elif hinge_pts:
+            cx = sum(v.x for v in hinge_pts) / len(hinge_pts)
+            cy = sum(v.y for v in hinge_pts) / len(hinge_pts)
+            cz = sum(v.z for v in hinge_pts) / len(hinge_pts)
+            hinge_center = (cx, cy, cz)
+            hinge_vector = (0.0, 1.0, 0.0) if is_vertical else (1.0, 0.0, 0.0)
         else:
             hinge_center = (
                 (s_min + s_max) / 2.0 if not is_vertical else 0.0,

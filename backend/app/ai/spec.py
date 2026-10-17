@@ -17,6 +17,10 @@ class FuselageStationSpec(BaseModel):
     y_top_m: float = Field(description="Dorsal upper contour height in meters above thrustline/waterline")
     y_bot_m: float = Field(description="Ventral lower contour height in meters (typically negative or below thrustline)")
     half_width_m: float = Field(description="Fuselage lateral radius (half width) in meters at this station")
+    superellipse_n: float = Field(
+        default=2.0,
+        description="Lamé superellipse exponent n: 2.0 for circle/ellipse, 2.4-3.2 for squarish airliner/cargo fuselage",
+    )
 
 
 class CockpitSpec(BaseModel):
@@ -59,6 +63,18 @@ class WingSpec(BaseModel):
     )
     root_z: float = Field(default=0.80, description="Longitudinal position of wing root leading edge along Z")
     thickness_ratio: float = Field(default=0.12, description="NACA airfoil thickness ratio (e.g. 0.10 to 0.15)")
+    camber: float = Field(
+        default=0.0,
+        description="NACA 4-digit maximum camber fraction m (0.0 for symmetric NACA 00xx, 0.02 for NACA 2412)",
+    )
+    camber_pos: float = Field(
+        default=0.4,
+        description="Chordwise location of maximum camber p (fraction 0..1, e.g. 0.4 for 40% chord)",
+    )
+    washout_deg: float = Field(
+        default=-1.5,
+        description="Wingtip aerodynamic twist (washout) in degrees (negative for wash-out)",
+    )
     kink_eta: float | None = Field(
         default=None,
         description="Spanwise fraction (0..1) of a trailing-edge kink (Yehudi) if inboard TE is unswept (airliners ~0.30-0.40)",

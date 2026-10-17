@@ -39,6 +39,8 @@ class WingParameters:
     num_foil_points: int = 12  # Points around airfoil profile
     color: tuple[int, int, int] = (235, 190, 40)  # Golden yellow (like T-25 / Super Tucano demo)
     is_vertical: bool = False  # True for vertical stabilizer / rudder fin
+    camber: float = 0.0  # Max camber ratio (e.g. 0.02 for NACA 2412, 0.0 for symmetric NACA 00xx)
+    camber_pos: float = 0.4  # Max camber location (fraction 0..1, e.g. 0.4 for 40% chord)
     kink_eta: float | None = None  # Spanwise fraction of trailing-edge kink (Yehudi), None = single trapezoid
     kink_chord_m: float | None = None  # Chord at kink station (None = derived for unswept inboard TE)
 
@@ -79,9 +81,12 @@ class WingGenerator:
         chord: float,
         thickness_ratio: float,
         num_points: int = 12,
+        camber: float = 0.0,
+        camber_pos: float = 0.4,
     ) -> list[tuple[float, float]]:
         """
-        Generate (x_chord, y_thickness) normalized coordinates for a NACA 00xx symmetric airfoil.
+        Generate (x_chord, y_thickness) normalized coordinates for a NACA 4-digit airfoil
+        (symmetric NACA 00xx when camber=0.0, or cambered NACA mpxx when camber>0.0).
         Returns coordinates ordered counter-clockwise starting at Trailing Edge -> Upper Surface ->
         Leading Edge -> Lower Surface -> Trailing Edge.
         """
@@ -91,8 +96,8 @@ class WingGenerator:
         beta = np.linspace(0, math.pi, half_pts)
         x_norm = (1.0 - np.cos(beta)) / 2.0  # 0 at LE, 1 at TE
 
-        # NACA thickness distribution formula
-        t = thickness_ratio
+        # NACA half-thickness distribution formula
+        t = max(0.01, thickness_ratio)
         yt = 5.0 * t * (
             0.2969 * np.sqrt(x_norm)
             - 0.1260 * x_norm
@@ -101,20 +106,52 @@ class WingGenerator:
             - 0.1036 * (x_norm**4)  # Closed trailing edge
         )
 
+        if camber > 0.0 and 0.02 <= camber_pos <= 0.98:
+            # Cambered NACA 4-digit mean camber line and gradient
+            m_camber = camber
+            p_camber = camber_pos
+            yc_arr = np.zeros_like(x_norm)
+            dyc_dx = np.zeros_like(x_norm)
+
+            forward_mask = x_norm <= p_camber
+            aft_mask = ~forward_mask
+
+            yc_arr[forward_mask] = (m_camber / (p_camber**2)) * (
+                2.0 * p_camber * x_norm[forward_mask] - x_norm[forward_mask] ** 2
+            )
+            dyc_dx[forward_mask] = (2.0 * m_camber / (p_camber**2)) * (
+                p_camber - x_norm[forward_mask]
+            )
+
+            denom = (1.0 - p_camber) ** 2
+            yc_arr[aft_mask] = (m_camber / denom) * (
+                (1.0 - 2.0 * p_camber) + 2.0 * p_camber * x_norm[aft_mask] - x_norm[aft_mask] ** 2
+            )
+            dyc_dx[aft_mask] = (2.0 * m_camber / denom) * (p_camber - x_norm[aft_mask])
+
+            theta_camber = np.arctan(dyc_dx)
+
+            xu = (x_norm - yt * np.sin(theta_camber)) * chord
+            yu = (yc_arr + yt * np.cos(theta_camber)) * chord
+            xl = (x_norm + yt * np.sin(theta_camber)) * chord
+            yl = (yc_arr - yt * np.cos(theta_camber)) * chord
+        else:
+            # Symmetric NACA 00xx
+            xu = x_norm * chord
+            yu = yt * chord
+            xl = x_norm * chord
+            yl = -yt * chord
+
         upper_pts: list[tuple[float, float]] = []
         lower_pts: list[tuple[float, float]] = []
 
-        # From TE (x=1) to LE (x=0) for upper
+        # From TE (x=1) to LE (x=0) for upper surface
         for i in reversed(range(half_pts)):
-            xc = float(x_norm[i] * chord)
-            yc = float(yt[i] * chord)
-            upper_pts.append((xc, yc))
+            upper_pts.append((float(xu[i]), float(yu[i])))
 
-        # From LE (x=0) to TE (x=1) for lower (skip LE to avoid duplicate)
+        # From LE (x=0) to TE (x=1) for lower surface (skip LE to avoid duplicate)
         for i in range(1, half_pts):
-            xc = float(x_norm[i] * chord)
-            yc = float(-yt[i] * chord)
-            lower_pts.append((xc, yc))
+            lower_pts.append((float(xl[i]), float(yl[i])))
 
         return upper_pts + lower_pts
 
@@ -161,6 +198,8 @@ class WingGenerator:
                 chord=chord,
                 thickness_ratio=params.thickness_ratio,
                 num_points=params.num_foil_points,
+                camber=params.camber,
+                camber_pos=params.camber_pos,
             )
 
             # Station 3D origin
