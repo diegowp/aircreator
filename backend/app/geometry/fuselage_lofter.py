@@ -266,7 +266,8 @@ class FuselageLofter:
             z_k = z0 + l_dome * math.sin(phi)
             rx_k = r0_x * r_scale
             ry_k = r0_y_radome * r_scale
-            yc_k = y0_c - (0.05 * r0_y_radome) * math.sin(phi)
+            # Authentic airliner nose droop: nose apex drops towards the lower centerline
+            yc_k = y0_c - (0.35 * r0_y_radome) * math.sin(phi)
 
             r_start = len(all_vertices)
             dome_ring_starts.append(r_start)

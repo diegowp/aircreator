@@ -36,21 +36,39 @@ class WingSpec(BaseModel):
     planform: Literal["swept", "delta", "straight", "tapered", "variable_sweep"] = Field(
         default="tapered", description="Wing planform type"
     )
-    span_m: float = Field(description="Semi-span (half of total wingspan) in meters")
-    root_chord_m: float = Field(description="Wing root chord length in meters")
+    span_m: float = Field(
+        description="Semi-span measured from the fuselage CENTERLINE to the wingtip in meters (= total wingspan / 2)"
+    )
+    root_chord_m: float = Field(description="Wing root chord length in meters (at the fuselage side)")
     tip_chord_m: float = Field(description="Wing tip chord length in meters")
     sweep_leading_edge_deg: float = Field(
-        default=4.5, description="Leading edge sweep angle in degrees (0 for straight, 20-50 for swept/delta)"
+        default=4.5,
+        description=(
+            "LEADING EDGE sweep angle in degrees measured in the Top view (0 for straight, 20-50 for swept/delta). "
+            "Note: published airliner sweep values are usually quarter-chord (e.g. 737 = 25 deg c/4 = ~29 deg LE)."
+        ),
     )
     dihedral_deg: float = Field(default=4.0, description="Wing dihedral angle in degrees (usually 0 to 7)")
+    wing_position: Literal["low", "mid", "high"] | None = Field(
+        default=None,
+        description="Vertical wing mounting on the fuselage seen in Front/Side views: 'low' (airliners), 'mid', 'high' (cargo/turboprops)",
+    )
     root_x: float = Field(default=0.60, description="Wing root junction X offset from fuselage centerline in meters")
     root_y: float = Field(
         default=-0.15, description="Vertical placement: negative for low wing, 0 for mid wing, positive for high wing"
     )
     root_z: float = Field(default=0.80, description="Longitudinal position of wing root leading edge along Z")
     thickness_ratio: float = Field(default=0.12, description="NACA airfoil thickness ratio (e.g. 0.10 to 0.15)")
+    kink_eta: float | None = Field(
+        default=None,
+        description="Spanwise fraction (0..1) of a trailing-edge kink (Yehudi) if inboard TE is unswept (airliners ~0.30-0.40)",
+    )
+    kink_chord_m: float | None = Field(default=None, description="Chord at the trailing-edge kink in meters (optional)")
     has_winglets: bool = Field(default=False, description="True if wingtips have vertical winglets (e.g. 737 MAX split scimitar, A320 sharklets)")
     winglet_height_m: float = Field(default=1.40, description="Height of winglet above wingtip in meters")
+    winglet_type: Literal["blended", "split_scimitar", "sharklet", "fence"] = Field(
+        default="split_scimitar", description="Winglet style"
+    )
 
 
 class VerticalFinSpec(BaseModel):
@@ -59,6 +77,9 @@ class VerticalFinSpec(BaseModel):
     root_chord_m: float = Field(description="Root chord length in meters")
     tip_chord_m: float = Field(description="Tip chord length in meters")
     sweep_deg: float = Field(default=20.0, description="Leading edge sweep angle in degrees")
+    sweep_trailing_edge_deg: float | None = Field(
+        default=None, description="Trailing edge sweep angle in degrees (optional; derives tip chord when given)"
+    )
     offset_x: float = Field(default=0.0, description="Lateral offset from centerline (0 for central fin, >0 for twin fins)")
     root_y: float = Field(default=0.30, description="Vertical base position in meters")
     root_z: float = Field(default=-3.5, description="Longitudinal position of fin root in meters")
@@ -69,7 +90,8 @@ class HorizontalStabSpec(BaseModel):
     semi_span_m: float = Field(description="Semi-span in meters")
     root_chord_m: float = Field(description="Root chord length in meters")
     tip_chord_m: float = Field(description="Tip chord length in meters")
-    sweep_deg: float = Field(default=5.0, description="Sweep angle in degrees")
+    sweep_deg: float = Field(default=5.0, description="Leading edge sweep angle in degrees")
+    dihedral_deg: float = Field(default=0.0, description="Stabilizer dihedral in degrees seen in Front view (737 ~7)")
     root_y: float = Field(default=0.20, description="Vertical base position in meters (high for T-tail, low for conventional)")
     root_z: float = Field(default=-4.0, description="Longitudinal position in meters")
 

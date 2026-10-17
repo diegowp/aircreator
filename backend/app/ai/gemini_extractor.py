@@ -145,13 +145,16 @@ CRITICAL AERONAUTICAL EXTRACTION RULES:
      * Set cockpit.present = true with bubble canopy dimensions.
 
 3. WINGS & WINGLETS:
-   - Observe actual planform in Top view: extract real leading edge sweep angle (e.g. 25° for 737, 35° for fighters).
-   - Extract dihedral_deg from Front view (usually 4° to 6°).
-   - If wingtip winglets or split-scimitar winglets are present, set has_winglets = true and winglet_height_m.
+   - Observe actual planform in Top view: extract real LEADING EDGE sweep angle (e.g. for Boeing 737, quarter-chord is 25° but leading-edge sweep is ~28.8°; for fighters ~35°-45°).
+   - Set wing_position: 'low' for commercial airliners (wings attached to belly), 'high' for cargo/turboprops, 'mid' for fighters.
+   - Extract dihedral_deg from Front view (usually 5° to 7°).
+   - If inboard trailing edge is straight/unswept before angling aft (Yehudi break), set kink_eta (~0.35).
+   - If wingtip winglets or split-scimitar winglets are present, set has_winglets = true, winglet_height_m, and winglet_type.
 
 4. TAIL / EMPENNAGE:
    - If vertical fin has a forward dorsal fillet extension along the fuselage spine, set has_dorsal_fin = true.
-   - Extract vertical fin sweep (e.g. 35° for airliners) and horizontal stabilizer sweep.
+   - Extract vertical fin leading edge sweep (e.g. 37° for 737) and trailing edge sweep (usually 15°-20°, NOT vertical!).
+   - Extract horizontal stabilizer sweep and dihedral_deg (e.g. 7° for 737).
 
 Output the result strictly adhering to the JSON schema.
 """
@@ -212,13 +215,13 @@ Output the result strictly adhering to the JSON schema.
             for i, z in enumerate(z_coords):
                 u = float(i / (num_stations - 1))
                 if u < 0.18:
-                    # Aerodynamic rounded radome (circular cross-section with subtle droop)
+                    # Aerodynamic rounded radome (circular cross-section with downward droop)
                     radome_tip = 0.38
                     env = radome_tip + (1.0 - radome_tip) * math.sqrt(max(0.0, u / 0.18))
                     half_w = (max_w / 2.0) * env
                     # Circular radome cross-section (eliminates front-view egg distortion)
                     radome_r = half_w
-                    yc = (max_h / 2.0) * (0.04 - 0.10 * (1.0 - math.sqrt(max(0.0, u / 0.18))))
+                    yc = (max_h / 2.0) * (0.02 - 0.35 * (1.0 - math.sqrt(max(0.0, u / 0.18))))
                     y_top = yc + radome_r
                     y_bot = yc - radome_r
                 elif u <= 0.72:
@@ -249,22 +252,25 @@ Output the result strictly adhering to the JSON schema.
             fuselage = FuselageSpec(stations=stations, cockpit=cockpit)
 
             semi_span = wingspan_m / 2.0
-            root_chord = length_m * 0.19
-            tip_chord = root_chord * 0.25
+            root_chord = length_m * 0.20
+            tip_chord = root_chord * 0.22
 
             wings = WingSpec(
                 planform="swept",
-                span_m=round(semi_span - max_w * 0.48, 3),
+                span_m=round(semi_span, 3),
                 root_chord_m=round(root_chord, 3),
                 tip_chord_m=round(tip_chord, 3),
-                sweep_leading_edge_deg=25.0,  # Boeing 737 25° sweep
+                sweep_leading_edge_deg=28.8,  # Boeing 737 real LE sweep (c/4 is 25°)
                 dihedral_deg=5.5,
-                root_x=round(max_w * 0.48, 3),
-                root_y=round(-max_h * 0.35, 3),
-                root_z=round(nose_z - length_m * 0.44, 3),
+                wing_position="low",
+                root_x=round(max_w * 0.45, 3),
+                root_y=round(-max_h * 0.38, 3),
+                root_z=round(nose_z - length_m * 0.43, 3),
                 thickness_ratio=0.12,
+                kink_eta=0.36,  # Trailing edge Yehudi break (~36% span, near engine)
                 has_winglets=True,
                 winglet_height_m=1.45,
+                winglet_type="split_scimitar",
             )
 
             v_fin = VerticalFinSpec(
@@ -272,7 +278,8 @@ Output the result strictly adhering to the JSON schema.
                 height_m=round(height_m * 0.58, 3),
                 root_chord_m=round(length_m * 0.18, 3),
                 tip_chord_m=round(length_m * 0.07, 3),
-                sweep_deg=35.0,
+                sweep_deg=37.0,
+                sweep_trailing_edge_deg=18.0,  # Swept trailing edge (not vertical 90°)
                 offset_x=0.0,
                 root_y=round(max_h * 0.32, 3),
                 root_z=round(tail_z + length_m * 0.18, 3),
@@ -280,10 +287,11 @@ Output the result strictly adhering to the JSON schema.
 
             h_stab = HorizontalStabSpec(
                 present=True,
-                semi_span_m=round(wingspan_m * 0.19, 3),
+                semi_span_m=round(wingspan_m * 0.20, 3),
                 root_chord_m=round(length_m * 0.12, 3),
                 tip_chord_m=round(length_m * 0.05, 3),
-                sweep_deg=28.0,
+                sweep_deg=31.0,
+                dihedral_deg=7.0,  # Boeing 737 horizontal stabilizer has 7° dihedral!
                 root_y=round(max_h * 0.18, 3),
                 root_z=round(tail_z + length_m * 0.10, 3),
             )
@@ -301,9 +309,9 @@ Output the result strictly adhering to the JSON schema.
                 nacelle_count=2,
                 nacelle_radius=0.92,  # CFM LEAP-1B 1.84m cowl diameter
                 nacelle_length=3.80,
-                nacelle_offset_x=round(wingspan_m * 0.28, 3),  # Underwing position
-                nacelle_z=round(wings.root_z + 1.85, 3),  # Forward slung underwing (LEAP-1B)
-                thrustline_y=round(wings.root_y - 0.70 * 0.92, 3),
+                nacelle_offset_x=round(wingspan_m * 0.27, 3),  # Underwing position
+                nacelle_z=round(wings.root_z + 1.25, 3),
+                thrustline_y=round(-max_h * 0.45, 3),
             )
 
             return AircraftSemanticSpec(

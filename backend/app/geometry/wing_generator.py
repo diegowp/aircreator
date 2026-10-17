@@ -39,11 +39,40 @@ class WingParameters:
     num_foil_points: int = 12  # Points around airfoil profile
     color: tuple[int, int, int] = (235, 190, 40)  # Golden yellow (like T-25 / Super Tucano demo)
     is_vertical: bool = False  # True for vertical stabilizer / rudder fin
+    kink_eta: float | None = None  # Spanwise fraction of trailing-edge kink (Yehudi), None = single trapezoid
+    kink_chord_m: float | None = None  # Chord at kink station (None = derived for unswept inboard TE)
 
 
 class WingGenerator:
     def __init__(self):
         pass
+
+    @staticmethod
+    def resolve_kink(params: WingParameters) -> tuple[float | None, float | None]:
+        """Return (kink_eta, kink_chord) for a trailing-edge kink, or (None, None)."""
+        if not params.kink_eta or not (0.05 < params.kink_eta < 0.95):
+            return None, None
+        if params.kink_chord_m and params.kink_chord_m > 0:
+            kink_chord = params.kink_chord_m
+        else:
+            # Unswept inboard trailing edge: chord shrinks exactly by the LE aft offset
+            sweep_tan = math.tan(math.radians(params.sweep_deg))
+            kink_chord = params.root_chord_m - params.kink_eta * params.semi_span_m * sweep_tan
+        kink_chord = max(params.tip_chord_m, min(params.root_chord_m, kink_chord))
+        return params.kink_eta, kink_chord
+
+    @staticmethod
+    def chord_at(params: WingParameters, eta: float) -> float:
+        """Local chord at spanwise fraction eta (supports optional TE kink)."""
+        eta = max(0.0, min(1.0, eta))
+        kink_eta, kink_chord = WingGenerator.resolve_kink(params)
+        if kink_eta is None or kink_chord is None:
+            return params.root_chord_m + eta * (params.tip_chord_m - params.root_chord_m)
+        if eta <= kink_eta:
+            t = eta / kink_eta
+            return params.root_chord_m + t * (kink_chord - params.root_chord_m)
+        t = (eta - kink_eta) / (1.0 - kink_eta)
+        return kink_chord + t * (params.tip_chord_m - kink_chord)
 
     def generate_naca_airfoil_coords(
         self,
@@ -99,10 +128,23 @@ class WingGenerator:
         faces: list[SrfFace] = []
 
         n_span = params.num_span_stations
-        eta_coords = np.linspace(0.0, 1.0, n_span)  # Spanwise fraction 0.0 (root) to 1.0 (tip)
+        eta_list = list(np.linspace(0.0, 1.0, n_span))  # Spanwise fraction 0.0 (root) to 1.0 (tip)
 
         sweep_rad = math.radians(params.sweep_deg)
         dihedral_rad = math.radians(params.dihedral_deg)
+        # Leading edge moves aft by span * tan(sweep) (sin() underestimates the real sweep angle)
+        sweep_tan = math.tan(sweep_rad)
+
+        # Optional Yehudi / trailing-edge kink: piecewise-linear chord distribution
+        kink_eta, _ = self.resolve_kink(params)
+        if kink_eta is not None and all(abs(e - kink_eta) > 1e-3 for e in eta_list):
+            eta_list.append(kink_eta)
+            eta_list.sort()
+        eta_coords = eta_list
+        n_span = len(eta_coords)
+
+        def chord_at(eta_val: float) -> float:
+            return self.chord_at(params, eta_val)
 
         span_rings_start: list[int] = []
 
@@ -110,7 +152,7 @@ class WingGenerator:
 
         for eta in eta_coords:
             span_pos = eta * params.semi_span_m
-            chord = params.root_chord_m + eta * (params.tip_chord_m - params.root_chord_m)
+            chord = chord_at(eta)
             twist_deg = params.incidence_deg + eta * params.washout_deg
             twist_rad = math.radians(twist_deg)
 
@@ -127,12 +169,12 @@ class WingGenerator:
                 x_station = sign_x * (params.root_x + span_pos)
                 y_station = params.root_y + span_pos * math.sin(dihedral_rad)
                 # Sweep shifts chord backward (-Z)
-                z_station = params.root_z - span_pos * math.sin(sweep_rad)
+                z_station = params.root_z - span_pos * sweep_tan
             else:
                 # Vertical fin: span extends upward (+Y)
                 x_station = 0.0
                 y_station = params.root_y + span_pos
-                z_station = params.root_z - span_pos * math.sin(sweep_rad)
+                z_station = params.root_z - span_pos * sweep_tan
 
             ring_start = len(all_vertices)
             span_rings_start.append(ring_start)

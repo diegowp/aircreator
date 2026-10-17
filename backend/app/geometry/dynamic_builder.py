@@ -19,7 +19,7 @@ from app.parsers.dnm import DnmNode, DynaModel
 from app.parsers.srf import SrfFace, SrfVertex, SurfaceMesh
 
 
-def build_fuselage_from_spec(spec: AircraftSemanticSpec, vertices_per_ring: int = 16) -> SurfaceMesh:
+def build_fuselage_from_spec(spec: AircraftSemanticSpec, vertices_per_ring: int = 24) -> SurfaceMesh:
     """Build fuselage mesh directly from station cross-sections in spec."""
     lofter = FuselageLofter(num_stations=len(spec.fuselage.stations), vertices_per_ring=vertices_per_ring)
 
@@ -45,6 +45,8 @@ def build_turbofan_nacelle_mesh(
     nacelle_radius: float = 0.90,
     nacelle_length: float = 3.80,
     pylon_top_y: float | None = None,
+    pylon_le_z: float | None = None,
+    pylon_aft_z: float | None = None,
     color_cowl: tuple[int, int, int] = (240, 245, 250),
     color_lip: tuple[int, int, int] = (195, 200, 210),
     color_fan: tuple[int, int, int] = (30, 32, 38),
@@ -120,23 +122,23 @@ def build_turbofan_nacelle_mesh(
         j_next = (j + 1) % m
         faces.append(SrfFace(vertex_indices=[ex_idx, r_last + j_next, r_last + j], color=(35, 36, 42)))
 
-    # Mounting Pylon (strut connecting top of nacelle to wing lower surface)
+    # Mounting Pylon (strut connecting top of nacelle to wing lower surface and leading edge)
     top_y = pylon_top_y if pylon_top_y is not None else (center_y + nacelle_radius + 0.35)
     bot_y = center_y + nacelle_radius * 0.70
-    pylon_fwd_z = intake_z - 0.25 * nacelle_length
-    pylon_aft_z = intake_z - 0.90 * nacelle_length
+    p_fwd = pylon_le_z if pylon_le_z is not None else (intake_z - 0.25 * nacelle_length)
+    p_aft = pylon_aft_z if pylon_aft_z is not None else (intake_z - 0.90 * nacelle_length)
     pw = 0.12
 
     pv_start = len(all_vertices)
     p_pts = [
-        (center_x - pw, bot_y, pylon_fwd_z),  # 0
-        (center_x + pw, bot_y, pylon_fwd_z),  # 1
-        (center_x + pw, bot_y, pylon_aft_z),  # 2
-        (center_x - pw, bot_y, pylon_aft_z),  # 3
-        (center_x - pw, top_y, pylon_fwd_z),  # 4
-        (center_x + pw, top_y, pylon_fwd_z),  # 5
-        (center_x + pw, top_y, pylon_aft_z),  # 6
-        (center_x - pw, top_y, pylon_aft_z),  # 7
+        (center_x - pw, bot_y, p_fwd),  # 0
+        (center_x + pw, bot_y, p_fwd),  # 1
+        (center_x + pw, bot_y, p_aft),  # 2
+        (center_x - pw, bot_y, p_aft),  # 3
+        (center_x - pw, top_y, p_fwd),  # 4
+        (center_x + pw, top_y, p_fwd),  # 5
+        (center_x + pw, top_y, p_aft),  # 6
+        (center_x - pw, top_y, p_aft),  # 7
     ]
     for px, py, pz in p_pts:
         all_vertices.append(SrfVertex(x=px, y=py, z=pz, round_shading=False))
@@ -287,9 +289,45 @@ def build_jet_nozzle_mesh(
     return mesh
 
 
+def _fuselage_section_at(spec: AircraftSemanticSpec, z: float) -> tuple[float, float, float]:
+    """Interpolate the fuselage cross-section (y_center, radius_y, radius_x) at longitudinal position z."""
+    stations = sorted(spec.fuselage.stations, key=lambda s: s.z_m)
+    if not stations:
+        return 0.0, 1.0, 1.0
+
+    def section(s) -> tuple[float, float, float]:
+        return (
+            (s.y_top_m + s.y_bot_m) / 2.0,
+            max(0.02, (s.y_top_m - s.y_bot_m) / 2.0),
+            max(0.02, s.half_width_m),
+        )
+
+    if z <= stations[0].z_m:
+        return section(stations[0])
+    if z >= stations[-1].z_m:
+        return section(stations[-1])
+    for a, b in zip(stations[:-1], stations[1:]):
+        if a.z_m <= z <= b.z_m:
+            t = (z - a.z_m) / max(1e-6, b.z_m - a.z_m)
+            sa, sb = section(a), section(b)
+            return (
+                sa[0] + t * (sb[0] - sa[0]),
+                sa[1] + t * (sb[1] - sa[1]),
+                sa[2] + t * (sb[2] - sa[2]),
+            )
+    return section(stations[-1])
+
+
+def _skin_half_width(spec: AircraftSemanticSpec, z: float, y: float) -> float:
+    """Lateral half-width of the elliptical fuselage skin at height y of station z."""
+    yc, ry, rx = _fuselage_section_at(spec, z)
+    frac = max(-0.97, min(0.97, (y - yc) / ry))
+    return rx * math.sqrt(1.0 - frac * frac)
+
+
 def build_aircraft_from_semantic_spec(
     spec: AircraftSemanticSpec,
-    vertices_per_ring: int = 16,
+    vertices_per_ring: int = 24,
 ) -> dict[str, Any]:
     """
     Construct complete 3D aircraft from an AircraftSemanticSpec.
@@ -322,21 +360,55 @@ def build_aircraft_from_semantic_spec(
 
     # 3. Wings
     w = spec.wings
+    sweep_tan = math.tan(math.radians(w.sweep_leading_edge_deg))
+    dihedral_rad = math.radians(w.dihedral_deg)
+
+    # Vertical mounting derived from the real fuselage section at the wing root (low / mid / high wing)
+    wing_mid_z = w.root_z - 0.40 * w.root_chord_m
+    yc_w, ry_w, _ = _fuselage_section_at(spec, wing_mid_z)
+    if w.wing_position == "low":
+        wing_root_y = yc_w - 0.78 * ry_w
+    elif w.wing_position == "high":
+        wing_root_y = yc_w + 0.80 * ry_w
+    elif w.wing_position == "mid":
+        wing_root_y = yc_w
+    else:
+        wing_root_y = w.root_y
+
+    # Root junction embedded slightly inside the fuselage skin (no gap, no protrusion)
+    wing_root_x = max(0.05, 0.85 * _skin_half_width(spec, wing_mid_z, wing_root_y))
+
+    # span_m is centerline-to-tip; the overall wingspan (user dimension) is authoritative
+    semi_span_total = spec.wingspan_m / 2.0 if (spec.wingspan_m and spec.wingspan_m > 0) else w.span_m
+    panel_span = max(0.5, semi_span_total - wing_root_x)
+
     w_params = WingParameters(
         name="wing",
-        semi_span_m=w.span_m,
+        semi_span_m=panel_span,
         root_chord_m=w.root_chord_m,
         tip_chord_m=w.tip_chord_m,
         sweep_deg=w.sweep_leading_edge_deg,
         dihedral_deg=w.dihedral_deg,
-        root_x=w.root_x,
-        root_y=w.root_y,
+        root_x=wing_root_x,
+        root_y=wing_root_y,
         root_z=w.root_z,
         thickness_ratio=w.thickness_ratio,
+        kink_eta=w.kink_eta,
+        kink_chord_m=w.kink_chord_m,
     )
     wing_r = wing_gen.generate_wing_mesh(w_params, side="right")
     wing_l = wing_gen.generate_wing_mesh(w_params, side="left")
     components_to_merge.extend([wing_r, wing_l])
+
+    def wing_station(x_abs: float) -> tuple[float, float, float]:
+        """Return (leading_edge_z, chord_plane_y, local_chord) at lateral position x_abs."""
+        span_pos = max(0.0, min(panel_span, abs(x_abs) - wing_root_x))
+        eta = span_pos / panel_span
+        return (
+            w.root_z - span_pos * sweep_tan,
+            wing_root_y + span_pos * math.sin(dihedral_rad),
+            WingGenerator.chord_at(w_params, eta),
+        )
 
     # Wingtip Winglets (e.g. Split Scimitar for Boeing 737 MAX)
     winglet_r_mesh: SurfaceMesh | None = None
@@ -346,20 +418,18 @@ def build_aircraft_from_semantic_spec(
     tip_z_r: float = 0.0
 
     if w.has_winglets:
-        sweep_rad = math.radians(w.sweep_leading_edge_deg)
-        dihedral_rad = math.radians(w.dihedral_deg)
-        tip_x_r = w.root_x + w.span_m
-        tip_y_r = w.root_y + w.span_m * math.sin(dihedral_rad)
-        tip_z_r = w.root_z - w.span_m * math.sin(sweep_rad)
+        tip_x_r = wing_root_x + panel_span
+        tip_z_r, tip_y_r, tip_chord_eff = wing_station(tip_x_r)
+        is_split = w.winglet_type == "split_scimitar"
 
         winglet_r_mesh = build_winglet_mesh(
             winglet_name="winglet_r",
             tip_x=tip_x_r,
             tip_y=tip_y_r,
             tip_z=tip_z_r,
-            tip_chord=w.tip_chord_m,
+            tip_chord=tip_chord_eff,
             winglet_height=w.winglet_height_m,
-            is_split_scimitar=True,
+            is_split_scimitar=is_split,
             side="right",
         )
         winglet_l_mesh = build_winglet_mesh(
@@ -367,9 +437,9 @@ def build_aircraft_from_semantic_spec(
             tip_x=-tip_x_r,
             tip_y=tip_y_r,
             tip_z=tip_z_r,
-            tip_chord=w.tip_chord_m,
+            tip_chord=tip_chord_eff,
             winglet_height=w.winglet_height_m,
-            is_split_scimitar=True,
+            is_split_scimitar=is_split,
             side="left",
         )
         components_to_merge.extend([winglet_r_mesh, winglet_l_mesh])
@@ -380,16 +450,23 @@ def build_aircraft_from_semantic_spec(
 
     if spec.tail.horizontal_stabilizer and spec.tail.horizontal_stabilizer.present:
         h = spec.tail.horizontal_stabilizer
+        h_mid_z = h.root_z - 0.40 * h.root_chord_m
+        h_root_y = h.root_y
+        if spec.tail.configuration in ("conventional", "twin_fin"):
+            # Conventional stabilizers are mounted on the tail cone: keep the root inside the body
+            yc_h, ry_h, _ = _fuselage_section_at(spec, h_mid_z)
+            h_root_y = max(yc_h - 0.6 * ry_h, min(yc_h + 0.6 * ry_h, h.root_y))
+        h_root_x = max(0.05, 0.85 * _skin_half_width(spec, h_mid_z, h_root_y))
         h_params = WingParameters(
             name="elevator_1",
-            semi_span_m=h.semi_span_m,
+            semi_span_m=max(0.3, h.semi_span_m - h_root_x),
             root_chord_m=h.root_chord_m,
             tip_chord_m=h.tip_chord_m,
             sweep_deg=h.sweep_deg,
-            dihedral_deg=0.0,
+            dihedral_deg=h.dihedral_deg,
             thickness_ratio=0.10,
-            root_x=max(0.15, spec.fuselage.stations[-1].half_width_m),
-            root_y=h.root_y,
+            root_x=h_root_x,
+            root_y=h_root_y,
             root_z=h.root_z,
         )
         h_stab_r = wing_gen.generate_wing_mesh(h_params, side="right")
@@ -408,18 +485,35 @@ def build_aircraft_from_semantic_spec(
 
     # Vertical Fin(s)
     main_v_fin: SurfaceMesh | None = None
+    main_fin_root_y: float | None = None
+    main_fin_root_z: float | None = None
 
     for fin_spec in spec.tail.vertical_fins:
+        fin_tip_chord = fin_spec.tip_chord_m
+        if fin_spec.sweep_trailing_edge_deg is not None:
+            # Tip chord follows from LE and TE sweep: c_tip = c_root - h * (tan(LE) - tan(TE))
+            derived = fin_spec.root_chord_m - fin_spec.height_m * (
+                math.tan(math.radians(fin_spec.sweep_deg)) - math.tan(math.radians(fin_spec.sweep_trailing_edge_deg))
+            )
+            fin_tip_chord = max(0.15 * fin_spec.root_chord_m, min(fin_spec.root_chord_m, derived))
+
+        fin_root_y = fin_spec.root_y
+        if fin_spec.offset_x <= 0.1:
+            # Seat the central fin on the fuselage spine (lowest point under the root chord)
+            aft_z = fin_spec.root_z - 0.80 * fin_spec.root_chord_m
+            yc_f, ry_f, _ = _fuselage_section_at(spec, aft_z)
+            fin_root_y = yc_f + ry_f - 0.05
+
         v_params = WingParameters(
             name=fin_spec.name,
             semi_span_m=fin_spec.height_m,
             root_chord_m=fin_spec.root_chord_m,
-            tip_chord_m=fin_spec.tip_chord_m,
+            tip_chord_m=fin_tip_chord,
             sweep_deg=fin_spec.sweep_deg,
             dihedral_deg=0.0,
             thickness_ratio=0.10,
             root_x=fin_spec.offset_x,
-            root_y=fin_spec.root_y,
+            root_y=fin_root_y,
             root_z=fin_spec.root_z,
             is_vertical=True,
         )
@@ -434,6 +528,8 @@ def build_aircraft_from_semantic_spec(
             components_to_merge.append(fin_c)
             if main_v_fin is None:
                 main_v_fin = fin_c
+                main_fin_root_y = fin_root_y
+                main_fin_root_z = fin_spec.root_z
 
     if main_v_fin is None:
         fallback_params = WingParameters(name="rudder_1", semi_span_m=1.0, root_chord_m=0.8, tip_chord_m=0.4, is_vertical=True)
@@ -447,8 +543,12 @@ def build_aircraft_from_semantic_spec(
 
     if spec.tail.has_dorsal_fin:
         fin_spec = spec.tail.vertical_fins[0] if spec.tail.vertical_fins else None
-        fin_root_z_val = fin_spec.root_z if fin_spec else (spec.fuselage.stations[-1].z_m + 3.0)
-        fin_root_y_val = fin_spec.root_y if fin_spec else 0.5
+        if main_fin_root_z is not None and main_fin_root_y is not None:
+            fin_root_z_val = main_fin_root_z
+            fin_root_y_val = main_fin_root_y
+        else:
+            fin_root_z_val = fin_spec.root_z if fin_spec else (spec.fuselage.stations[-1].z_m + 3.0)
+            fin_root_y_val = fin_spec.root_y if fin_spec else 0.5
         dorsal_mesh = build_dorsal_fin_mesh(
             fin_root_z=fin_root_z_val,
             fin_root_y=fin_root_y_val,
@@ -462,64 +562,58 @@ def build_aircraft_from_semantic_spec(
     jet_mesh: SurfaceMesh | None = None
     engine_r_mesh: SurfaceMesh | None = None
     engine_l_mesh: SurfaceMesh | None = None
+    engine_offset_x: float = 0.0
+    center_y: float = 0.0
+    intake_z: float = 0.0
 
     if spec.propulsion.type == "jet_pod_underwing":
         # Underwing turbofan pods (Airliners / Commercial Jets)
-        offset_x = spec.propulsion.nacelle_offset_x or (spec.wingspan_m * 0.28)
         nacelle_radius = spec.propulsion.nacelle_radius or 0.92
         nacelle_length = spec.propulsion.nacelle_length or 3.80
 
-        # Calculate wing attachment coordinate
-        sweep_rad = math.radians(w.sweep_leading_edge_deg)
-        dihedral_rad = math.radians(w.dihedral_deg)
-        span_dist = max(0.5, offset_x - w.root_x)
-        wing_st_y = w.root_y + span_dist * math.sin(dihedral_rad)
-        wing_st_z = w.root_z - span_dist * math.sin(sweep_rad)
+        # Lateral station: must sit on the wing panel, clear of the fuselage
+        engine_offset_x = spec.propulsion.nacelle_offset_x or (semi_span_total * 0.28)
+        min_off = wing_root_x + nacelle_radius + 0.6
+        max_off = wing_root_x + 0.65 * panel_span
+        engine_offset_x = max(min_off, min(max_off, engine_offset_x))
 
-        intake_z = spec.propulsion.nacelle_z if (spec.propulsion.nacelle_z and spec.propulsion.nacelle_z != 0.0) else (wing_st_z + 1.85)
-        center_y = wing_st_y - nacelle_radius * 0.70
-        pylon_top = wing_st_y + 0.18
+        le_z, wing_y, c_loc = wing_station(engine_offset_x)
+
+        # Longitudinal: exhaust plane tucked ~25% local chord under the wing (pylon-mounted turbofan)
+        auto_intake = le_z - 0.25 * c_loc + nacelle_length
+        nz = spec.propulsion.nacelle_z
+        if nz and (le_z - 0.6 * c_loc) <= (nz - nacelle_length) <= (le_z + 0.2):
+            intake_z = nz
+        else:
+            intake_z = auto_intake
+
+        # Vertical: nacelle crown just below the wing chord plane (close-coupled, LEAP-1B style)
+        center_y = wing_y - 1.05 * nacelle_radius
 
         engine_r_mesh = build_turbofan_nacelle_mesh(
             nacelle_name="engine_r",
             intake_z=intake_z,
-            center_x=+offset_x,
+            center_x=+engine_offset_x,
             center_y=center_y,
             nacelle_radius=nacelle_radius,
             nacelle_length=nacelle_length,
-            pylon_top_y=pylon_top,
+            pylon_top_y=wing_y,
+            pylon_le_z=le_z,
+            pylon_aft_z=le_z - 0.70 * c_loc,
         )
         engine_l_mesh = build_turbofan_nacelle_mesh(
             nacelle_name="engine_l",
             intake_z=intake_z,
-            center_x=-offset_x,
+            center_x=-engine_offset_x,
             center_y=center_y,
             nacelle_radius=nacelle_radius,
             nacelle_length=nacelle_length,
-            pylon_top_y=pylon_top,
+            pylon_top_y=wing_y,
+            pylon_le_z=le_z,
+            pylon_aft_z=le_z - 0.70 * c_loc,
         )
         components_to_merge.extend([engine_r_mesh, engine_l_mesh])
 
-    elif spec.propulsion.type == "propeller_nose":
-        (f_min_x, f_min_y, f_min_z), (f_max_x, f_max_y, f_max_z) = fuselage_mesh.bounding_box()
-        f_len = max(1.0, f_max_z - f_min_z)
-        propeller_mesh = wing_gen.generate_propeller_mesh(
-            nose_z=f_max_z,
-            thrustline_y=spec.propulsion.thrustline_y,
-            spinner_length=spec.propulsion.spinner_length or (f_len * 0.08),
-            spinner_radius=spec.propulsion.spinner_radius or (spec.fuselage.stations[0].half_width_m * 0.9),
-            prop_radius=spec.wingspan_m * 0.12,
-            num_blades=spec.propulsion.num_blades or 5,
-        )
-        components_to_merge.append(propeller_mesh)
-
-    elif spec.propulsion.type == "jet_internal":
-        jet_mesh = build_jet_nozzle_mesh(
-            exhaust_z=spec.propulsion.exhaust_z,
-            exhaust_radius=spec.propulsion.exhaust_radius or 0.35,
-            thrustline_y=spec.propulsion.thrustline_y,
-        )
-        components_to_merge.append(jet_mesh)
 
     # 6. Kinematics Rigging & Control Surface Slicing
     rigging_engine = KinematicsRiggingEngine()
@@ -544,12 +638,12 @@ def build_aircraft_from_semantic_spec(
 
     if engine_r_mesh and engine_l_mesh:
         er_dict = engine_r_mesh.to_dict()
-        er_dict["pivot"] = [+spec.propulsion.nacelle_offset_x or (spec.wingspan_m * 0.28), center_y, intake_z]
+        er_dict["pivot"] = [+engine_offset_x, center_y, intake_z]
         er_dict["cla"] = 0
         component_meshes["engine_r"] = er_dict
 
         el_dict = engine_l_mesh.to_dict()
-        el_dict["pivot"] = [-spec.propulsion.nacelle_offset_x or (spec.wingspan_m * 0.28), center_y, intake_z]
+        el_dict["pivot"] = [-engine_offset_x, center_y, intake_z]
         el_dict["cla"] = 0
         component_meshes["engine_l"] = el_dict
 

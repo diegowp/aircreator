@@ -107,7 +107,8 @@ class TestDynamicReconstructionEndpoints(unittest.TestCase):
         spec = data["spec"]
         self.assertEqual(spec["aircraft_type"], "airliner")
         self.assertEqual(spec["propulsion"]["type"], "jet_pod_underwing")
-        self.assertAlmostEqual(spec["wings"]["sweep_leading_edge_deg"], 25.0, delta=1.0)
+        self.assertAlmostEqual(spec["wings"]["sweep_leading_edge_deg"], 28.8, delta=1.0)
+        self.assertEqual(spec["wings"].get("wing_position"), "low")
         self.assertTrue(spec["wings"]["has_winglets"])
         self.assertFalse(spec["fuselage"]["cockpit"]["present"], "Airliners should not have bubble canopies")
 
